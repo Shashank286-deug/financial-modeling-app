@@ -3,54 +3,63 @@ import yfinance as yf
 import requests
 import pandas as pd
 import matplotlib.pyplot as plt
-import smtplib
-from email.message import EmailMessage
-from io import BytesIO
-from datetime import datetime
-import openpyxl
-from openpyxl.chart import BarChart, Reference
+import io
+from openpyxl import load_workbook, Workbook
+from openpyxl.chart import LineChart, Reference
+import os
+import json
+import datetime
+import time
 
-# Set layout with dark mode toggle
+# Set layout
 st.set_page_config(page_title="Financial Dashboard", layout="wide")
 st.title("📊 Financial Model & Valuation Dashboard")
-
-# Theme toggle
-theme = st.sidebar.radio("Choose Theme", ["Light", "Dark"])
-if theme == "Dark":
-    st.markdown("""
-        <style>
-        body {
-            background-color: #111;
-            color: white;
-        }
-        </style>
-    """, unsafe_allow_html=True)
 
 # Sidebar Settings
 st.sidebar.header("Settings")
 data_source = st.sidebar.selectbox("Choose Data Source", ["Yahoo Finance", "Alpha Vantage", "Finnhub"])
-ticker = st.sidebar.text_input("Enter Stock Ticker", value="AAPL")
-email_address = st.sidebar.text_input("Enter Email for Alerts (optional)")
+ticker_input = st.sidebar.text_input("Enter Stock Ticker(s), comma-separated", value="AAPL,MSFT")
+search_query = st.sidebar.text_input("Search historical tickers")
 
-# Hardcoded API keys
-ALPHA_VANTAGE_API_KEY = "Q8LU981EWC83K7VI"
-FINNHUB_API_KEY = "cvrbc29r01qp88cpdph0cvrbc29r01qp88cpdphg"
+# Filter history
+filtered_history = []
+if search_query:
+    with open("ticker_history.json", 'r') as f:
+        all_tickers = json.load(f)
+    filtered_history = [t for t in all_tickers if search_query.upper() in t.upper()]
+    st.sidebar.write("Matches:", filtered_history)
 
-# Functions
+# Schedule auto-refresh (simulate periodic fetch)
+refresh = st.sidebar.checkbox("⏰ Enable Auto Refresh", value=False)
+interval = st.sidebar.number_input("Refresh interval (secs)", min_value=10, max_value=3600, value=60)
+
+# API keys
+alpha_key = "Z0ANCCQ81ZW5OVYZ"
+finnhub_key = "cvrbc29r01qp88cpdph0cvrbc29r01qp88cpdphg"
+
+# Excel Template Upload
+template_file = st.sidebar.file_uploader("Upload Excel Template", type=[".xlsx"])
+
+# Parse tickers
+ticker_list = [t.strip().upper() for t in ticker_input.split(',') if t.strip()]
+
+# Data functions
 def get_yahoo_data(ticker):
     stock = yf.Ticker(ticker)
     info = stock.info
+    hist = stock.history(period="1y")
     data = {
         "P/E Ratio": info.get("trailingPE", "N/A"),
         "EPS": info.get("trailingEps", "N/A"),
         "EBITDA": info.get("ebitda", "N/A"),
         "Cash Flow": info.get("operatingCashflow", "N/A"),
-        "Revenue": info.get("totalRevenue", "N/A")
+        "Revenue": info.get("totalRevenue", "N/A"),
+        "History": hist
     }
     return data
 
-def get_alpha_data(ticker):
-    url = f"https://www.alphavantage.co/query?function=OVERVIEW&symbol={ticker}&apikey={ALPHA_VANTAGE_API_KEY}"
+def get_alpha_data(ticker, api_key):
+    url = f"https://www.alphavantage.co/query?function=OVERVIEW&symbol={ticker}&apikey={api_key}"
     r = requests.get(url)
     if r.status_code != 200:
         return {}
@@ -60,129 +69,126 @@ def get_alpha_data(ticker):
         "EPS": info.get("EPS", "N/A"),
         "EBITDA": info.get("EBITDA", "N/A"),
         "Cash Flow": info.get("OperatingCashflow", "N/A"),
-        "Revenue": info.get("RevenueTTM", "N/A")
+        "Revenue": info.get("RevenueTTM", "N/A"),
+        "History": None
     }
     return data
 
-def get_finnhub_data(ticker):
-    client = finnhub.Client(api_key=FINNHUB_API_KEY)
+def get_finnhub_data(ticker, api_key):
+    client = finnhub.Client(api_key=api_key)
     try:
         fundamentals = client.company_basic_financials(ticker, 'all')['metric']
+        candles = client.stock_candles(ticker, 'D', 1640995200, 1711929600)
+        df_hist = pd.DataFrame({"Date": pd.to_datetime(candles['t'], unit='s'), "Close": candles['c']}) if candles and 'c' in candles else None
         data = {
             "P/E Ratio": fundamentals.get("peBasicExclExtraTTM", "N/A"),
             "EPS": fundamentals.get("epsTTM", "N/A"),
             "EBITDA": fundamentals.get("ebitda", "N/A"),
             "Cash Flow": fundamentals.get("freeCashFlowTTM", "N/A"),
-            "Revenue": fundamentals.get("revenueTTM", "N/A")
+            "Revenue": fundamentals.get("revenueTTM", "N/A"),
+            "History": df_hist.set_index("Date") if df_hist is not None else None
         }
         return data
     except:
         return {}
 
-def send_email_alert(receiver, subject, body):
-    try:
-        msg = EmailMessage()
-        msg['Subject'] = subject
-        msg['From'] = "financial-dashboard@example.com"
-        msg['To'] = receiver
-        msg.set_content(body)
+# Load or initialize ticker history
+history_file = "ticker_history.json"
+if os.path.exists(history_file):
+    with open(history_file, 'r') as f:
+        ticker_history = json.load(f)
+else:
+    ticker_history = []
 
-        # Placeholder SMTP - adjust to real credentials and SMTP service
-        with smtplib.SMTP("smtp.gmail.com", 587) as server:
-            server.starttls()
-            # server.login("you@example.com", "password")
-            # server.send_message(msg)
-            pass
-        return True
-    except:
-        return False
-
-def save_to_excel_with_chart(df, ticker):
-    buffer = BytesIO()
-    df.to_excel(buffer, index=False, sheet_name="Metrics")
-    buffer.seek(0)
-
-    wb = openpyxl.load_workbook(buffer)
-    ws = wb["Metrics"]
-
-    chart = BarChart()
-    chart.title = f"{ticker} Metrics"
-    chart.y_axis.title = 'Value'
-    chart.x_axis.title = 'Metric'
-
-    data_ref = Reference(ws, min_col=2, min_row=1, max_row=6)
-    cats_ref = Reference(ws, min_col=1, min_row=2, max_row=6)
-    chart.add_data(data_ref, titles_from_data=True)
-    chart.set_categories(cats_ref)
-
-    ws.add_chart(chart, "D2")
-
-    final_buffer = BytesIO()
-    wb.save(final_buffer)
-    final_buffer.seek(0)
-    return final_buffer
-
-# Fetch Button
-if st.button("📅 Fetch Data"):
-    with st.spinner("Fetching data..."):
+def process_all():
+    for ticker in ticker_list:
+        st.subheader(f"📈 {ticker} Metrics")
         if data_source == "Yahoo Finance":
             metrics = get_yahoo_data(ticker)
         elif data_source == "Alpha Vantage":
-            metrics = get_alpha_data(ticker)
-        elif data_source == "Finnhub":
-            metrics = get_finnhub_data(ticker)
+            metrics = get_alpha_data(ticker, alpha_key)
         else:
-            metrics = {}
+            metrics = get_finnhub_data(ticker, finnhub_key)
 
         if not metrics:
-            st.error("Data fetch failed. Please check ticker or try a different source.")
-        else:
-            tab1, tab2 = st.tabs(["📈 Metrics Table", "📊 Visualizations"])
+            st.error(f"Data fetch failed for {ticker}.")
+            continue
 
-            with tab1:
-                st.subheader("📈 Key Metrics")
-                df = pd.DataFrame(metrics.items(), columns=["Metric", "Value"])
-                styled_df = df.style.format({"Value": "{:.2f}"}).highlight_null(null_color='red').set_properties(**{'background-color': '#f4f4f4', 'border': '1px solid #ddd'})
-                st.dataframe(styled_df, use_container_width=True)
+        df = pd.DataFrame({"Metric": list(metrics.keys())[:-1], "Value": list(metrics.values())[:-1]})
+        st.dataframe(df, use_container_width=True)
 
-                # Excel Export
-                excel_data = save_to_excel_with_chart(df, ticker)
-                st.download_button("📤 Download as Excel", excel_data, file_name=f"{ticker}_metrics.xlsx")
+        # Bar Chart
+        try:
+            numeric = df[df['Value'].apply(lambda x: isinstance(x, (int, float)) or str(x).replace('.', '', 1).isdigit())]
+            fig, ax = plt.subplots()
+            ax.bar(numeric['Metric'], numeric['Value'].astype(float), color='teal')
+            ax.set_title(f"{ticker} - Financial Metrics")
+            st.pyplot(fig)
+        except:
+            st.warning("Bar chart skipped: numeric conversion issue.")
 
-                # Save history
-                history_df = pd.DataFrame([[datetime.now().isoformat(), ticker, data_source]],
-                                          columns=["Timestamp", "Ticker", "Source"])
+        # Pie Chart
+        try:
+            fig2, ax2 = plt.subplots()
+            ax2.pie(numeric['Value'].astype(float), labels=numeric['Metric'], autopct='%1.1f%%')
+            ax2.set_title("Metric Composition")
+            st.pyplot(fig2)
+        except:
+            st.warning("Pie chart skipped: issue rendering values.")
+
+        # Time Series Chart
+        if metrics.get("History") is not None:
+            st.line_chart(metrics["History"]["Close"], use_container_width=True)
+
+        # Excel Fill and Chart
+        if template_file:
+            wb = load_workbook(template_file)
+            ws = wb.active
+            fill_map = {
+                "B2": "P/E Ratio",
+                "B3": "EPS",
+                "B4": "EBITDA",
+                "B5": "Cash Flow",
+                "B6": "Revenue"
+            }
+            for cell, key in fill_map.items():
+                val = metrics.get(key, "N/A")
                 try:
-                    history_df.to_csv("ticker_history.csv", mode='a', index=False, header=not pd.io.common.file_exists("ticker_history.csv"))
+                    ws[cell] = float(val) if str(val).replace('.', '', 1).isdigit() else val
                 except:
-                    pass
+                    ws[cell] = val
 
-                # Email alert
-                if email_address:
-                    success = send_email_alert(email_address, f"Metrics for {ticker}", df.to_string(index=False))
-                    if success:
-                        st.success(f"Email alert sent to {email_address}!")
-                    else:
-                        st.warning("Failed to send email. Check configuration.")
+            # Auto Chart inside Excel
+            chart = LineChart()
+            chart.title = "Historical Prices"
+            if metrics.get("History") is not None:
+                hist = metrics["History"].reset_index()
+                hist['Date'] = hist['Date'].dt.strftime('%Y-%m-%d')
+                for i, row in hist.iterrows():
+                    ws.append([row['Date'], row['Close']])
+                data_ref = Reference(ws, min_col=2, min_row=len(fill_map)+2, max_row=ws.max_row)
+                cats_ref = Reference(ws, min_col=1, min_row=len(fill_map)+2, max_row=ws.max_row)
+                chart.add_data(data_ref, titles_from_data=False)
+                chart.set_categories(cats_ref)
+                ws.add_chart(chart, f"D10")
 
-            with tab2:
-                try:
-                    values = []
-                    labels = []
-                    for k, v in metrics.items():
-                        try:
-                            val = float(v)
-                            values.append(val)
-                            labels.append(k)
-                        except:
-                            continue
+            output = io.BytesIO()
+            wb.save(output)
+            st.download_button("📥 Download Updated Excel", data=output.getvalue(), file_name=f"{ticker}_updated.xlsx")
 
-                    if values:
-                        fig = px.bar(x=labels, y=values, labels={'x': 'Metric', 'y': 'Value'},
-                                     title=f"{ticker.upper()} - Key Financial Metrics",
-                                     color=labels, color_discrete_sequence=px.colors.sequential.Teal)
-                        st.plotly_chart(fig, use_container_width=True)
-                    else:
-                        st.warning("No numeric values found for visualization.")
-                except:
-                    st.warning("Visualization failed. Please check values.")
+        # Save ticker history
+        if ticker not in ticker_history:
+            ticker_history.append(ticker)
+            with open(history_file, 'w') as f:
+                json.dump(ticker_history, f)
+
+    st.success("✅ Done processing all tickers!")
+
+if refresh:
+    last_run = time.time()
+    while time.time() - last_run < interval:
+        process_all()
+        time.sleep(interval)
+else:
+    if st.button("📥 Fetch Data"):
+        process_all()
