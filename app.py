@@ -18,25 +18,6 @@ def fetch_global_quote(symbol):
     r = requests.get(url)
     data = r.json()
     return data.get("Global Quote", {})
-import yfinance as yf
-
-def get_yahoo_data(ticker):
-    stock = yf.Ticker(ticker)
-
-    info = stock.info
-    financials = stock.financials
-    cashflow = stock.cashflow
-    balance_sheet = stock.balance_sheet
-
-    data = {
-        "P/E": info.get("trailingPE", "N/A"),
-        "EPS": info.get("trailingEps", "N/A"),
-        "EBITDA": info.get("ebitda", "N/A"),
-        "Cash Flow": cashflow.iloc[0].sum() if not cashflow.empty else "N/A",
-        "Revenue": info.get("totalRevenue", "N/A")
-    }
-    return data
-
 
 def calculate_valuation_metrics(quote, financials):
     try:
