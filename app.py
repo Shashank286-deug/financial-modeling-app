@@ -4,26 +4,20 @@ from openpyxl import load_workbook
 import tempfile
 import shutil
 import pandas as pd
-    
-def get_yahoo_data(ticker):
-    try:
-        stock = yf.Ticker(ticker)
-        info = stock.info
-        financials = stock.financials
-        cashflow = stock.cashflow
-        balance_sheet = stock.balance_sheet
 
-        data = {
-            "P/E Ratio": info.get("trailingPE", "N/A"),
-            "EPS": info.get("trailingEps", "N/A"),
-            "EBITDA": info.get("ebitda", "N/A"),
-            "Cash Flow": cashflow.iloc[0].sum() if not cashflow.empty else "N/A",
-            "Revenue": info.get("totalRevenue", "N/A")
-        }
-        return data
-    except Exception as e:
-        st.error(f"Error fetching Yahoo Finance data: {e}")
-        return {}
+API_KEY = "70UUKXWKAZTUH2D5"
+
+def fetch_income_statement(symbol):
+    url = f"https://www.alphavantage.co/query?function=INCOME_STATEMENT&symbol={symbol}&apikey={API_KEY}"
+    r = requests.get(url)
+    data = r.json()
+    return data.get("annualReports", [{}])[0], data.get("annualReports", [])[:5]
+
+def fetch_global_quote(symbol):
+    url = f"https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={symbol}&apikey={API_KEY}"
+    r = requests.get(url)
+    data = r.json()
+    return data.get("Global Quote", {})
 
 def calculate_valuation_metrics(quote, financials):
     try:
