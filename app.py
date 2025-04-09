@@ -5,9 +5,6 @@ import tempfile
 import shutil
 import pandas as pd
 
-import yfinance as yf
-
-
 API_KEY = "IY6OG6BHU4HU26HY"
 
 def fetch_income_statement(symbol):
@@ -21,6 +18,27 @@ def fetch_global_quote(symbol):
     r = requests.get(url)
     data = r.json()
     return data.get("Global Quote", {})
+    
+def get_yahoo_data(ticker):
+    try:
+        stock = yf.Ticker(ticker)
+        info = stock.info
+        financials = stock.financials
+        cashflow = stock.cashflow
+        balance_sheet = stock.balance_sheet
+
+        data = {
+            "P/E Ratio": info.get("trailingPE", "N/A"),
+            "EPS": info.get("trailingEps", "N/A"),
+            "EBITDA": info.get("ebitda", "N/A"),
+            "Cash Flow": cashflow.iloc[0].sum() if not cashflow.empty else "N/A",
+            "Revenue": info.get("totalRevenue", "N/A")
+        }
+        return data
+    except Exception as e:
+        st.error(f"Error fetching Yahoo Finance data: {e}")
+        return {}
+
 
 def calculate_valuation_metrics(quote, financials):
     try:
