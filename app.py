@@ -3,7 +3,6 @@ import yfinance as yf
 import requests
 import pandas as pd
 import matplotlib.pyplot as plt
-import plotly.express as px
 import smtplib
 from email.message import EmailMessage
 from io import BytesIO
