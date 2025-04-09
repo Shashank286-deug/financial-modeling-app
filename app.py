@@ -1,119 +1,134 @@
 import streamlit as st
-import yfinance as yf
 import requests
-import openpyxl
-import matplotlib.pyplot as plt
-import io
+from openpyxl import load_workbook
 import tempfile
+import shutil
 import pandas as pd
-from openpyxl.drawing.image import Image
 
-# API key for Alpha Vantage
-ALPHA_VANTAGE_API_KEY = "Q8LU981EWC83K7VI"
+API_KEY = "Q8LU981EWC83K7VI"
 
-st.set_page_config(page_title="📊 Financial Model Generator", layout="wide")
+def fetch_income_statement(symbol):
+    url = f"https://www.alphavantage.co/query?function=INCOME_STATEMENT&symbol={symbol}&apikey={API_KEY}"
+    r = requests.get(url)
+    data = r.json()
+    return data.get("annualReports", [{}])[0], data.get("annualReports", [])[:5]
 
-st.title("📊 Financial Model Generator")
-st.markdown("Upload your Excel template, choose a company, and auto-fill the financial model with live data!")
+def fetch_global_quote(symbol):
+    url = f"https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={symbol}&apikey={API_KEY}"
+    r = requests.get(url)
+    data = r.json()
+    return data.get("Global Quote", {})
 
-# Step 1: Select data source
-data_source = st.selectbox("Choose Data Source", ["Yahoo Finance", "Alpha Vantage"])
-
-# Step 2: Enter ticker symbol
-ticker = st.text_input("Enter Ticker Symbol (e.g., TATAMOTORS.BO, AAPL)", "TATAMOTORS.BO")
-
-# Step 3: Upload Excel template
-uploaded_file = st.file_uploader("Upload your Excel Template", type=["xlsx"])
-
-def get_data_yahoo(ticker):
+def calculate_valuation_metrics(quote, financials):
     try:
-        stock = yf.Ticker(ticker)
-        info = stock.info
+        price = float(quote.get("05. price", 0))
+        shares = int(financials.get("weightedAverageShsOut", "1"))
+        eps = float(financials.get("eps", "0"))
+
+        pe_ratio = price / eps if eps else 0
+        market_cap = price * shares
+        revenue = int(financials.get("totalRevenue", "0"))
+        ps_ratio = market_cap / revenue if revenue else 0
 
         return {
-            "EPS": info.get("trailingEps", None),
-            "EBITDA": info.get("ebitda", None),
-            "P/E": info.get("trailingPE", None),
-            "FreeCashFlow": info.get("freeCashflow", None),
-            "MarketCap": info.get("marketCap", None)
+            "P/E Ratio": round(pe_ratio, 2),
+            "P/S Ratio": round(ps_ratio, 2),
+            "Market Cap ($M)": round(market_cap / 1e6, 2),
+            "Share Price ($)": round(price, 2)
         }
     except Exception as e:
-        st.error(f"Error fetching from Yahoo Finance: {e}")
+        st.error(f"Error calculating valuation metrics: {e}")
         return {}
 
-def get_data_alpha(ticker):
+def fill_template(financials, template_path):
+    temp_dir = tempfile.mkdtemp()
+    new_path = f"{temp_dir}/Filled_Model.xlsx"
+    shutil.copy(template_path, new_path)
+
+    wb = load_workbook(new_path)
+    sheet = wb.active
+
     try:
-        url = f"https://www.alphavantage.co/query?function=OVERVIEW&symbol={ticker}&apikey={ALPHA_VANTAGE_API_KEY}"
-        response = requests.get(url)
-        data = response.json()
-
-        return {
-            "EPS": float(data.get("EPS", 0)),
-            "EBITDA": float(data.get("EBITDA", 0)),
-            "P/E": float(data.get("PERatio", 0)),
-            "FreeCashFlow": float(data.get("FreeCashFlowPerShare", 0)) * float(data.get("SharesOutstanding", 1)),
-            "MarketCap": float(data.get("MarketCapitalization", 0))
-        }
+        sheet["B3"] = financials.get("totalRevenue", "N/A")
+        sheet["B4"] = financials.get("netIncome", "N/A")
+        sheet["B5"] = financials.get("eps", "N/A")
+        sheet["B6"] = financials.get("ebitda", "N/A")
+        sheet["B7"] = financials.get("operatingCashflow", "N/A")
     except Exception as e:
-        st.error(f"Error fetching from Alpha Vantage: {e}")
-        return {}
+        print(f"Error filling cells: {e}")
 
-# Fetch data
-if st.button("🔍 Fetch & Fill Data") and uploaded_file and ticker:
-    st.info("Fetching data...")
+    wb.save(new_path)
+    return new_path
 
-    if data_source == "Yahoo Finance":
-        financials = get_data_yahoo(ticker)
+def get_chart_data(history):
+    years = [r["fiscalDateEnding"][:4] for r in history]
+    revenue = [int(r["totalRevenue"]) / 1e6 for r in history]
+    income = [int(r["netIncome"]) / 1e6 for r in history]
+    ebitda = [int(r.get("ebitda", 0)) / 1e6 for r in history]
+    cashflow = [int(r.get("operatingCashflow", 0)) / 1e6 for r in history]
+    return years[::-1], revenue[::-1], income[::-1], ebitda[::-1], cashflow[::-1]
+
+# ---- Streamlit UI ----
+st.set_page_config(layout="wide", page_title="Financial Modeling App")
+st.title("💼 Auto Financial Modeling Tool")
+
+symbol = st.text_input("Enter Stock Symbol", value="TATAMOTORS.BSE")
+data_source = st.selectbox("Choose Data Source", ["Alpha Vantage"])  # Expandable
+
+if symbol:
+    financials, history = fetch_income_statement(symbol)
+    quote = fetch_global_quote(symbol)
+
+    if not financials:
+        st.error("Couldn't fetch financial data.")
     else:
-        financials = get_data_alpha(ticker)
+        tabs = st.tabs(["📊 Dashboard", "📁 Excel Model"])
 
-    st.write("📈 Retrieved Data:", financials)
+        with tabs[0]:
+            st.subheader(f"📊 Financial Dashboard: {symbol}")
 
-    if financials and uploaded_file:
-        # Load template
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
-            tmp.write(uploaded_file.read())
-            tmp_path = tmp.name
+            # --- Key Metrics
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Revenue", f"${int(financials['totalRevenue'])/1e6:.2f} M")
+            col2.metric("Net Income", f"${int(financials['netIncome'])/1e6:.2f} M")
+            col3.metric("EPS", financials.get("eps", "N/A"))
 
-        wb = openpyxl.load_workbook(tmp_path)
-        ws = wb.active  # Assume data is in first sheet
+            col4, col5 = st.columns(2)
+            col4.metric("EBITDA", f"${int(financials.get('ebitda', 0))/1e6:.2f} M")
+            col5.metric("Operating Cash Flow", f"${int(financials.get('operatingCashflow', 0))/1e6:.2f} M")
 
-        # Define cell mappings (adjust as per your template)
-        mappings = {
-            "EPS": "B6",
-            "EBITDA": "B7",
-            "P/E": "B8",
-            "FreeCashFlow": "B9",
-            "MarketCap": "B10"
-        }
+            # --- Valuation Metrics
+            st.markdown("### 📈 Valuation Metrics")
+            val_metrics = calculate_valuation_metrics(quote, financials)
 
-        for key, cell in mappings.items():
-            if key in financials and financials[key] is not None:
-                try:
-                    ws[cell] = financials[key]
-                except Exception as e:
-                    st.warning(f"Could not write {key} to {cell}: {e}")
+            col6, col7, col8, col9 = st.columns(4)
+            col6.metric("P/E Ratio", val_metrics.get("P/E Ratio", "N/A"))
+            col7.metric("P/S Ratio", val_metrics.get("P/S Ratio", "N/A"))
+            col8.metric("Market Cap ($M)", val_metrics.get("Market Cap ($M)", "N/A"))
+            col9.metric("Share Price", f"${val_metrics.get('Share Price ($)', 'N/A')}")
 
-        # Create visualization
-        fig, ax = plt.subplots()
-        labels = [k for k in financials if financials[k] is not None]
-        values = [financials[k] for k in labels]
-        ax.barh(labels, values, color="skyblue")
-        ax.set_title(f"{ticker} Financial Snapshot")
+            # --- Historical Chart
+            years, revs, incomes, ebitdas, cashflows = get_chart_data(history)
 
-        # Save plot as image
-        image_path = tempfile.NamedTemporaryFile(delete=False, suffix=".png").name
-        fig.savefig(image_path, bbox_inches='tight')
+            st.markdown("### 📉 Historical Financial Trends")
+            st.line_chart(pd.DataFrame({
+                "Revenue ($M)": revs,
+                "Net Income ($M)": incomes,
+                "EBITDA ($M)": ebitdas,
+                "Operating Cash Flow ($M)": cashflows
+            }, index=years))
 
-        # Insert chart in Excel
-        img = Image(image_path)
-        ws.add_image(img, "D6")  # Place wherever you want
+        with tabs[1]:
+            st.subheader("📁 Upload Excel Template to Fill")
+            uploaded_file = st.file_uploader("Upload Template (.xlsx)", type=["xlsx"])
 
-        # Save final output
-        output_path = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx").name
-        wb.save(output_path)
+            if uploaded_file and st.button("🛠️ Generate Financial Model"):
+                st.info("Processing...")
 
-        # Provide download
-        with open(output_path, "rb") as f:
-            st.download_button("📥 Download Updated Excel", f, file_name="Updated_Model.xlsx")
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
+                    tmp.write(uploaded_file.read())
+                    filled_path = fill_template(financials, tmp.name)
 
+                with open(filled_path, "rb") as f:
+                    st.success("Model ready! Download below 👇")
+                    st.download_button("📥 Download Filled Model", f, file_name="Financial_Model_Filled.xlsx")
