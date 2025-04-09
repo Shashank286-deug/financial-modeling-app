@@ -5,7 +5,7 @@ import tempfile
 import shutil
 import pandas as pd
 
-API_KEY = "IY6OG6BHU4HU26HY"
+API_KEY = "70UUKXWKAZTUH2D5"
 
 def fetch_income_statement(symbol):
     url = f"https://www.alphavantage.co/query?function=INCOME_STATEMENT&symbol={symbol}&apikey={API_KEY}"
@@ -38,7 +38,6 @@ def get_yahoo_data(ticker):
     except Exception as e:
         st.error(f"Error fetching Yahoo Finance data: {e}")
         return {}
-
 
 def calculate_valuation_metrics(quote, financials):
     try:
