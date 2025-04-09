@@ -15,7 +15,7 @@ data_source = st.sidebar.selectbox("Choose Data Source", ["Yahoo Finance", "Alph
 ticker = st.sidebar.text_input("Enter Stock Ticker", value="AAPL")
 
 # API keys
-alpha_key = st.sidebar.text_input("Alpha Vantage API Key", value="Q8LU981EWC83K7VI") if data_source == "Alpha Vantage" else None
+alpha_key = st.sidebar.text_input("Alpha Vantage API Key", value="Z0ANCCQ81ZW5OVYZ") if data_source == "Alpha Vantage" else None
 finnhub_key = st.sidebar.text_input("Finnhub API Key", value="cvrbc29r01qp88cpdph0cvrbc29r01qp88cpdphg", type="password") if data_source == "Finnhub" else None
 
 # Functions
