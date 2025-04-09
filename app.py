@@ -44,26 +44,6 @@ def calculate_valuation_metrics(quote, financials):
         return {}
     
 
-        def get_yahoo_data(ticker):
-    stock = yf.Ticker(ticker)
-
-    info = stock.info
-    financials = stock.financials
-    cashflow = stock.cashflow
-    balance_sheet = stock.balance_sheet
-
-    data = {
-        "P/E": info.get("trailingPE", "N/A"),
-        "EPS": info.get("trailingEps", "N/A"),
-        "EBITDA": info.get("ebitda", "N/A"),
-        "Cash Flow": cashflow.iloc[0].sum() if not cashflow.empty else "N/A",
-        "Revenue": info.get("totalRevenue", "N/A")
-    }
-    return data   
-
-
-
-
 def fill_template(financials, template_path):
     temp_dir = tempfile.mkdtemp()
     new_path = f"{temp_dir}/Filled_Model.xlsx"
