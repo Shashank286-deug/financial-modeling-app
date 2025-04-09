@@ -3,7 +3,6 @@ import yfinance as yf
 import requests
 import pandas as pd
 import matplotlib.pyplot as plt
-import finnhub
 import io
 from openpyxl import load_workbook
 
