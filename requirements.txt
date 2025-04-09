@@ -1,5 +1,4 @@
 streamlit
-yfinance
 requests
 pandas
 matplotlib
