@@ -2,7 +2,6 @@ import streamlit as st
 import yfinance as yf
 import requests
 import pandas as pd
-import seaborn as sns
 import matplotlib.pyplot as plt
 import finnhub
 import plotly.express as px
