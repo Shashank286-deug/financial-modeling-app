@@ -3,25 +3,22 @@ import yfinance as yf
 import requests
 import pandas as pd
 import matplotlib.pyplot as plt
+import finnhub
 
-
-# Streamlit config
+# Set layout
 st.set_page_config(page_title="Financial Dashboard", layout="wide")
 st.title("📊 Financial Model & Valuation Dashboard")
 
-# Sidebar Inputs
+# Sidebar Settings
 st.sidebar.header("Settings")
 data_source = st.sidebar.selectbox("Choose Data Source", ["Yahoo Finance", "Alpha Vantage", "Finnhub"])
 ticker = st.sidebar.text_input("Enter Stock Ticker", value="AAPL")
 
-# API keys based on data source
-alpha_key = finnhub_key = None
-if data_source == "Alpha Vantage":
-    alpha_key = st.sidebar.text_input("Alpha Vantage API Key", value="Z0ANCCQ81ZW5OVYZ")
-elif data_source == "Finnhub":
-    finnhub_key = st.sidebar.text_input("Finnhub API Key", value="cvrbc29r01qp88cpdph0cvrbc29r01qp88cpdphg", type="password")
+# Hardcoded API keys
+ALPHA_VANTAGE_API_KEY = "Q8LU981EWC83K7VI"
+FINNHUB_API_KEY = "cvrbc29r01qp88cpdph0cvrbc29r01qp88cpdphg"
 
-# Primary functions remain the same
+# Functions
 def get_yahoo_data(ticker):
     stock = yf.Ticker(ticker)
     info = stock.info
@@ -34,8 +31,8 @@ def get_yahoo_data(ticker):
     }
     return data
 
-def get_alpha_data(ticker, api_key):
-    url = f"https://www.alphavantage.co/query?function=OVERVIEW&symbol={ticker}&apikey={api_key}"
+def get_alpha_data(ticker):
+    url = f"https://www.alphavantage.co/query?function=OVERVIEW&symbol={ticker}&apikey={ALPHA_VANTAGE_API_KEY}"
     r = requests.get(url)
     if r.status_code != 200:
         return {}
@@ -49,10 +46,8 @@ def get_alpha_data(ticker, api_key):
     }
     return data
 
-def get_finnhub_data(ticker, api_key):
-    if not api_key:
-        return {}
-    client = finnhub.Client(api_key=api_key)
+def get_finnhub_data(ticker):
+    client = finnhub.Client(api_key=FINNHUB_API_KEY)
     try:
         fundamentals = client.company_basic_financials(ticker, 'all')['metric']
         data = {
@@ -66,26 +61,26 @@ def get_finnhub_data(ticker, api_key):
     except:
         return {}
 
-# Fetch & Display
-if st.button("📥 Fetch Data"):
+# Main Logic
+if st.button("📅 Fetch Data"):
     with st.spinner("Fetching data..."):
         if data_source == "Yahoo Finance":
             metrics = get_yahoo_data(ticker)
         elif data_source == "Alpha Vantage":
-            metrics = get_alpha_data(ticker, alpha_key)
+            metrics = get_alpha_data(ticker)
         elif data_source == "Finnhub":
-            metrics = get_finnhub_data(ticker, finnhub_key)
+            metrics = get_finnhub_data(ticker)
         else:
             metrics = {}
 
         if not metrics:
-            st.error("Data fetch failed. Please check ticker or API keys.")
+            st.error("Data fetch failed. Please check ticker or try a different source.")
         else:
             st.subheader("📈 Key Metrics")
             df = pd.DataFrame(metrics.items(), columns=["Metric", "Value"])
             st.dataframe(df, use_container_width=True)
 
-            # Visualization
+            # Visual
             try:
                 values = []
                 labels = []
