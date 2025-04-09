@@ -5,20 +5,23 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import finnhub
 
-# Set layout
+# Streamlit config
 st.set_page_config(page_title="Financial Dashboard", layout="wide")
 st.title("📊 Financial Model & Valuation Dashboard")
 
-# Sidebar Settings
+# Sidebar Inputs
 st.sidebar.header("Settings")
 data_source = st.sidebar.selectbox("Choose Data Source", ["Yahoo Finance", "Alpha Vantage", "Finnhub"])
 ticker = st.sidebar.text_input("Enter Stock Ticker", value="AAPL")
 
-# API keys
-alpha_key = st.sidebar.text_input("Alpha Vantage API Key", value="Z0ANCCQ81ZW5OVYZ") if data_source == "Alpha Vantage" else None
-finnhub_key = st.sidebar.text_input("Finnhub API Key", value="cvrbc29r01qp88cpdph0cvrbc29r01qp88cpdphg", type="password") if data_source == "Finnhub" else None
+# API keys based on data source
+alpha_key = finnhub_key = None
+if data_source == "Alpha Vantage":
+    alpha_key = st.sidebar.text_input("Alpha Vantage API Key", value="Z0ANCCQ81ZW5OVYZ")
+elif data_source == "Finnhub":
+    finnhub_key = st.sidebar.text_input("Finnhub API Key", value="cvrbc29r01qp88cpdph0cvrbc29r01qp88cpdphg", type="password")
 
-# Functions
+# Primary functions remain the same
 def get_yahoo_data(ticker):
     stock = yf.Ticker(ticker)
     info = stock.info
@@ -51,10 +54,7 @@ def get_finnhub_data(ticker, api_key):
         return {}
     client = finnhub.Client(api_key=api_key)
     try:
-        quote = client.quote(ticker)
-        profile = client.company_profile2(symbol=ticker)
         fundamentals = client.company_basic_financials(ticker, 'all')['metric']
-
         data = {
             "P/E Ratio": fundamentals.get("peBasicExclExtraTTM", "N/A"),
             "EPS": fundamentals.get("epsTTM", "N/A"),
@@ -66,7 +66,7 @@ def get_finnhub_data(ticker, api_key):
     except:
         return {}
 
-# Main Button
+# Fetch & Display
 if st.button("📥 Fetch Data"):
     with st.spinner("Fetching data..."):
         if data_source == "Yahoo Finance":
@@ -85,14 +85,27 @@ if st.button("📥 Fetch Data"):
             df = pd.DataFrame(metrics.items(), columns=["Metric", "Value"])
             st.dataframe(df, use_container_width=True)
 
+            # Visualization
             try:
-                fig, ax = plt.subplots()
-                values = [float(v) for v in metrics.values() if isinstance(v, (int, float)) or (str(v).replace('.', '', 1).isdigit())]
-                labels = [k for k, v in metrics.items() if isinstance(v, (int, float)) or (str(v).replace('.', '', 1).isdigit())]
-                ax.bar(labels, values, color='teal')
-                ax.set_title(f"{ticker.upper()} - Key Financial Metrics")
-                ax.set_ylabel("USD")
-                ax.set_xticklabels(labels, rotation=45)
-                st.pyplot(fig)
+                values = []
+                labels = []
+                for k, v in metrics.items():
+                    try:
+                        val = float(v)
+                        values.append(val)
+                        labels.append(k)
+                    except:
+                        continue
+
+                if values:
+                    fig, ax = plt.subplots()
+                    ax.bar(labels, values, color='teal')
+                    ax.set_title(f"{ticker.upper()} - Key Financial Metrics")
+                    ax.set_ylabel("USD")
+                    ax.set_xticks(range(len(labels)))
+                    ax.set_xticklabels(labels, rotation=45)
+                    st.pyplot(fig)
+                else:
+                    st.warning("No numeric values found for visualization.")
             except:
-                st.warning("Some values may not be numeric for visualization.")
+                st.warning("Visualization failed. Please check values.")
