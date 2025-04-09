@@ -10,6 +10,11 @@ import os
 import json
 import datetime
 import time
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.base import MIMEBase
+from email import encoders
 
 # Set layout
 st.set_page_config(page_title="Financial Dashboard", layout="wide")
@@ -32,6 +37,10 @@ if search_query:
 # Schedule auto-refresh (simulate periodic fetch)
 refresh = st.sidebar.checkbox("⏰ Enable Auto Refresh", value=False)
 interval = st.sidebar.number_input("Refresh interval (secs)", min_value=10, max_value=3600, value=60)
+
+# Email Alerts
+email_alert = st.sidebar.checkbox("📧 Enable Email Alert")
+recipient_email = st.sidebar.text_input("Recipient Email") if email_alert else None
 
 # API keys
 alpha_key = "Z0ANCCQ81ZW5OVYZ"
@@ -100,7 +109,9 @@ if os.path.exists(history_file):
 else:
     ticker_history = []
 
+# Process tickers
 def process_all():
+    all_reports = []
     for ticker in ticker_list:
         st.subheader(f"📈 {ticker} Metrics")
         if data_source == "Yahoo Finance":
@@ -142,7 +153,7 @@ def process_all():
 
         # Excel Fill and Chart
         if template_file:
-            wb = load_workbook(template_file)
+            wb = load_workbook(io.BytesIO(template_file.read()), data_only=True)
             ws = wb.active
             fill_map = {
                 "B2": "P/E Ratio",
@@ -174,13 +185,46 @@ def process_all():
 
             output = io.BytesIO()
             wb.save(output)
-            st.download_button("📥 Download Updated Excel", data=output.getvalue(), file_name=f"{ticker}_updated.xlsx")
+            st.download_button("📅 Download Updated Excel", data=output.getvalue(), file_name=f"{ticker}_updated.xlsx")
 
         # Save ticker history
         if ticker not in ticker_history:
             ticker_history.append(ticker)
             with open(history_file, 'w') as f:
                 json.dump(ticker_history, f)
+
+        all_reports.append(df)
+
+    # Export to CSV
+    csv_export = pd.concat(all_reports)
+    st.download_button("⬇️ Export All Metrics as CSV", csv_export.to_csv(index=False), file_name="all_ticker_metrics.csv")
+
+    # Send email
+    if email_alert and recipient_email:
+        try:
+            msg = MIMEMultipart()
+            msg['From'] = "your_email@example.com"
+            msg['To'] = recipient_email
+            msg['Subject'] = "Financial Report"
+
+            body = "Attached is your latest financial data report."
+            msg.attach(MIMEText(body, 'plain'))
+
+            csv_part = MIMEBase('application', 'octet-stream')
+            csv_data = csv_export.to_csv(index=False).encode('utf-8')
+            csv_part.set_payload(csv_data)
+            encoders.encode_base64(csv_part)
+            csv_part.add_header('Content-Disposition', "attachment; filename=all_ticker_metrics.csv")
+            msg.attach(csv_part)
+
+            server = smtplib.SMTP('smtp.gmail.com', 587)
+            server.starttls()
+            server.login("your_email@example.com", "your_email_password")
+            server.send_message(msg)
+            server.quit()
+            st.success("📧 Email sent successfully!")
+        except Exception as e:
+            st.error(f"Failed to send email: {e}")
 
     st.success("✅ Done processing all tickers!")
 
@@ -190,5 +234,5 @@ if refresh:
         process_all()
         time.sleep(interval)
 else:
-    if st.button("📥 Fetch Data"):
+    if st.button("📅 Fetch Data"):
         process_all()
