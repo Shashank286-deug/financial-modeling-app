@@ -4,6 +4,20 @@ from openpyxl import load_workbook
 import tempfile
 import shutil
 import pandas as pd
+
+API_KEY = "Q8LU981EWC83K7VI"
+
+def fetch_income_statement(symbol):
+    url = f"https://www.alphavantage.co/query?function=INCOME_STATEMENT&symbol={symbol}&apikey={API_KEY}"
+    r = requests.get(url)
+    data = r.json()
+    return data.get("annualReports", [{}])[0], data.get("annualReports", [])[:5]
+
+def fetch_global_quote(symbol):
+    url = f"https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={symbol}&apikey={API_KEY}"
+    r = requests.get(url)
+    data = r.json()
+    return data.get("Global Quote", {})
 import yfinance as yf
 
 def get_yahoo_data(ticker):
@@ -23,20 +37,6 @@ def get_yahoo_data(ticker):
     }
     return data
 
-
-API_KEY = "Q8LU981EWC83K7VI"
-
-def fetch_income_statement(symbol):
-    url = f"https://www.alphavantage.co/query?function=INCOME_STATEMENT&symbol={symbol}&apikey={API_KEY}"
-    r = requests.get(url)
-    data = r.json()
-    return data.get("annualReports", [{}])[0], data.get("annualReports", [])[:5]
-
-def fetch_global_quote(symbol):
-    url = f"https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={symbol}&apikey={API_KEY}"
-    r = requests.get(url)
-    data = r.json()
-    return data.get("Global Quote", {})
 
 def calculate_valuation_metrics(quote, financials):
     try:
