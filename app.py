@@ -1,135 +1,98 @@
 import streamlit as st
+import yfinance as yf
 import requests
-from openpyxl import load_workbook
-import tempfile
-import shutil
 import pandas as pd
+import matplotlib.pyplot as plt
+import finnhub
 
-API_KEY = "70UUKXWKAZTUH2D5"
+# Set layout
+st.set_page_config(page_title="Financial Dashboard", layout="wide")
+st.title("📊 Financial Model & Valuation Dashboard")
 
-def fetch_income_statement(symbol):
-    url = f"https://www.alphavantage.co/query?function=INCOME_STATEMENT&symbol={symbol}&apikey={API_KEY}"
+# Sidebar Settings
+st.sidebar.header("Settings")
+data_source = st.sidebar.selectbox("Choose Data Source", ["Yahoo Finance", "Alpha Vantage", "Finnhub"])
+ticker = st.sidebar.text_input("Enter Stock Ticker", value="AAPL")
+
+# API keys
+alpha_key = st.sidebar.text_input("Alpha Vantage API Key", value="Q8LU981EWC83K7VI") if data_source == "Alpha Vantage" else None
+finnhub_key = st.sidebar.text_input("Finnhub API Key", value="", type="password") if data_source == "Finnhub" else None
+
+# Functions
+def get_yahoo_data(ticker):
+    stock = yf.Ticker(ticker)
+    info = stock.info
+    data = {
+        "P/E Ratio": info.get("trailingPE", "N/A"),
+        "EPS": info.get("trailingEps", "N/A"),
+        "EBITDA": info.get("ebitda", "N/A"),
+        "Cash Flow": info.get("operatingCashflow", "N/A"),
+        "Revenue": info.get("totalRevenue", "N/A")
+    }
+    return data
+
+def get_alpha_data(ticker, api_key):
+    url = f"https://www.alphavantage.co/query?function=OVERVIEW&symbol={ticker}&apikey={api_key}"
     r = requests.get(url)
-    data = r.json()
-    return data.get("annualReports", [{}])[0], data.get("annualReports", [])[:5]
-
-def fetch_global_quote(symbol):
-    url = f"https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={symbol}&apikey={API_KEY}"
-    r = requests.get(url)
-    data = r.json()
-    return data.get("Global Quote", {})
-
-def calculate_valuation_metrics(quote, financials):
-    try:
-        price = float(quote.get("05. price", 0))
-        shares = int(financials.get("weightedAverageShsOut", "1"))
-        eps = float(financials.get("eps", "0"))
-
-        pe_ratio = price / eps if eps else 0
-        market_cap = price * shares
-        revenue = int(financials.get("totalRevenue", "0"))
-        ps_ratio = market_cap / revenue if revenue else 0
-
-        return {
-            "P/E Ratio": round(pe_ratio, 2),
-            "P/S Ratio": round(ps_ratio, 2),
-            "Market Cap ($M)": round(market_cap / 1e6, 2),
-            "Share Price ($)": round(price, 2)
-        }
-    except Exception as e:
-        st.error(f"Error calculating valuation metrics: {e}")
+    if r.status_code != 200:
         return {}
-    
+    info = r.json()
+    data = {
+        "P/E Ratio": info.get("PERatio", "N/A"),
+        "EPS": info.get("EPS", "N/A"),
+        "EBITDA": info.get("EBITDA", "N/A"),
+        "Cash Flow": info.get("OperatingCashflow", "N/A"),
+        "Revenue": info.get("RevenueTTM", "N/A")
+    }
+    return data
 
-def fill_template(financials, template_path):
-    temp_dir = tempfile.mkdtemp()
-    new_path = f"{temp_dir}/Filled_Model.xlsx"
-    shutil.copy(template_path, new_path)
-
-    wb = load_workbook(new_path)
-    sheet = wb.active
-
+def get_finnhub_data(ticker, api_key):
+    if not api_key:
+        return {}
+    client = finnhub.Client(api_key=api_key)
     try:
-        sheet["B3"] = financials.get("totalRevenue", "N/A")
-        sheet["B4"] = financials.get("netIncome", "N/A")
-        sheet["B5"] = financials.get("eps", "N/A")
-        sheet["B6"] = financials.get("ebitda", "N/A")
-        sheet["B7"] = financials.get("operatingCashflow", "N/A")
-    except Exception as e:
-        print(f"Error filling cells: {e}")
+        quote = client.quote(ticker)
+        profile = client.company_profile2(symbol=ticker)
+        fundamentals = client.company_basic_financials(ticker, 'all')['metric']
 
-    wb.save(new_path)
-    return new_path
+        data = {
+            "P/E Ratio": fundamentals.get("peBasicExclExtraTTM", "N/A"),
+            "EPS": fundamentals.get("epsTTM", "N/A"),
+            "EBITDA": fundamentals.get("ebitda", "N/A"),
+            "Cash Flow": fundamentals.get("freeCashFlowTTM", "N/A"),
+            "Revenue": fundamentals.get("revenueTTM", "N/A")
+        }
+        return data
+    except:
+        return {}
 
-def get_chart_data(history):
-    years = [r["fiscalDateEnding"][:4] for r in history]
-    revenue = [int(r["totalRevenue"]) / 1e6 for r in history]
-    income = [int(r["netIncome"]) / 1e6 for r in history]
-    ebitda = [int(r.get("ebitda", 0)) / 1e6 for r in history]
-    cashflow = [int(r.get("operatingCashflow", 0)) / 1e6 for r in history]
-    return years[::-1], revenue[::-1], income[::-1], ebitda[::-1], cashflow[::-1]
+# Main Button
+if st.button("📥 Fetch Data"):
+    with st.spinner("Fetching data..."):
+        if data_source == "Yahoo Finance":
+            metrics = get_yahoo_data(ticker)
+        elif data_source == "Alpha Vantage":
+            metrics = get_alpha_data(ticker, alpha_key)
+        elif data_source == "Finnhub":
+            metrics = get_finnhub_data(ticker, finnhub_key)
+        else:
+            metrics = {}
 
-# ---- Streamlit UI ----
-st.set_page_config(layout="wide", page_title="Financial Modeling App")
-st.title("💼 Auto Financial Modeling Tool")
+        if not metrics:
+            st.error("Data fetch failed. Please check ticker or API keys.")
+        else:
+            st.subheader("📈 Key Metrics")
+            df = pd.DataFrame(metrics.items(), columns=["Metric", "Value"])
+            st.dataframe(df, use_container_width=True)
 
-symbol = st.text_input("Enter Stock Symbol", value="TATAMOTORS.BSE")
-data_source = st.selectbox("Choose Data Source", ["Alpha Vantage"])  # Expandable
-
-if symbol:
-    financials, history = fetch_income_statement(symbol)
-    quote = fetch_global_quote(symbol)
-
-    if not financials:
-        st.error("Couldn't fetch financial data.")
-    else:
-        tabs = st.tabs(["📊 Dashboard", "📁 Excel Model"])
-
-        with tabs[0]:
-            st.subheader(f"📊 Financial Dashboard: {symbol}")
-
-            # --- Key Metrics
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Revenue", f"${int(financials['totalRevenue'])/1e6:.2f} M")
-            col2.metric("Net Income", f"${int(financials['netIncome'])/1e6:.2f} M")
-            col3.metric("EPS", financials.get("eps", "N/A"))
-
-            col4, col5 = st.columns(2)
-            col4.metric("EBITDA", f"${int(financials.get('ebitda', 0))/1e6:.2f} M")
-            col5.metric("Operating Cash Flow", f"${int(financials.get('operatingCashflow', 0))/1e6:.2f} M")
-
-            # --- Valuation Metrics
-            st.markdown("### 📈 Valuation Metrics")
-            val_metrics = calculate_valuation_metrics(quote, financials)
-
-            col6, col7, col8, col9 = st.columns(4)
-            col6.metric("P/E Ratio", val_metrics.get("P/E Ratio", "N/A"))
-            col7.metric("P/S Ratio", val_metrics.get("P/S Ratio", "N/A"))
-            col8.metric("Market Cap ($M)", val_metrics.get("Market Cap ($M)", "N/A"))
-            col9.metric("Share Price", f"${val_metrics.get('Share Price ($)', 'N/A')}")
-
-            # --- Historical Chart
-            years, revs, incomes, ebitdas, cashflows = get_chart_data(history)
-
-            st.markdown("### 📉 Historical Financial Trends")
-            st.line_chart(pd.DataFrame({
-                "Revenue ($M)": revs,
-                "Net Income ($M)": incomes,
-                "EBITDA ($M)": ebitdas,
-                "Operating Cash Flow ($M)": cashflows
-            }, index=years))
-
-        with tabs[1]:
-            st.subheader("📁 Upload Excel Template to Fill")
-            uploaded_file = st.file_uploader("Upload Template (.xlsx)", type=["xlsx"])
-
-            if uploaded_file and st.button("🛠️ Generate Financial Model"):
-                st.info("Processing...")
-
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
-                    tmp.write(uploaded_file.read())
-                    filled_path = fill_template(financials, tmp.name)
-
-                with open(filled_path, "rb") as f:
-                    st.success("Model ready! Download below 👇")
-                    st.download_button("📥 Download Filled Model", f, file_name="Financial_Model_Filled.xlsx")
+            try:
+                fig, ax = plt.subplots()
+                values = [float(v) for v in metrics.values() if isinstance(v, (int, float)) or (str(v).replace('.', '', 1).isdigit())]
+                labels = [k for k, v in metrics.items() if isinstance(v, (int, float)) or (str(v).replace('.', '', 1).isdigit())]
+                ax.bar(labels, values, color='teal')
+                ax.set_title(f"{ticker.upper()} - Key Financial Metrics")
+                ax.set_ylabel("USD")
+                ax.set_xticklabels(labels, rotation=45)
+                st.pyplot(fig)
+            except:
+                st.warning("Some values may not be numeric for visualization.")
