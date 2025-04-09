@@ -3,7 +3,7 @@ import yfinance as yf
 import requests
 import pandas as pd
 import matplotlib.pyplot as plt
-import finnhub
+
 
 # Streamlit config
 st.set_page_config(page_title="Financial Dashboard", layout="wide")
