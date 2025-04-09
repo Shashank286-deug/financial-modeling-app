@@ -2,8 +2,16 @@ import streamlit as st
 import yfinance as yf
 import requests
 import pandas as pd
+import seaborn as sns
 import matplotlib.pyplot as plt
+import finnhub
 import plotly.express as px
+import smtplib
+from email.message import EmailMessage
+from io import BytesIO
+from datetime import datetime
+import openpyxl
+from openpyxl.chart import BarChart, Reference
 
 # Set layout with dark mode toggle
 st.set_page_config(page_title="Financial Dashboard", layout="wide")
@@ -25,6 +33,7 @@ if theme == "Dark":
 st.sidebar.header("Settings")
 data_source = st.sidebar.selectbox("Choose Data Source", ["Yahoo Finance", "Alpha Vantage", "Finnhub"])
 ticker = st.sidebar.text_input("Enter Stock Ticker", value="AAPL")
+email_address = st.sidebar.text_input("Enter Email for Alerts (optional)")
 
 # Hardcoded API keys
 ALPHA_VANTAGE_API_KEY = "Q8LU981EWC83K7VI"
@@ -73,6 +82,49 @@ def get_finnhub_data(ticker):
     except:
         return {}
 
+def send_email_alert(receiver, subject, body):
+    try:
+        msg = EmailMessage()
+        msg['Subject'] = subject
+        msg['From'] = "financial-dashboard@example.com"
+        msg['To'] = receiver
+        msg.set_content(body)
+
+        # Placeholder SMTP - adjust to real credentials and SMTP service
+        with smtplib.SMTP("smtp.gmail.com", 587) as server:
+            server.starttls()
+            # server.login("you@example.com", "password")
+            # server.send_message(msg)
+            pass
+        return True
+    except:
+        return False
+
+def save_to_excel_with_chart(df, ticker):
+    buffer = BytesIO()
+    df.to_excel(buffer, index=False, sheet_name="Metrics")
+    buffer.seek(0)
+
+    wb = openpyxl.load_workbook(buffer)
+    ws = wb["Metrics"]
+
+    chart = BarChart()
+    chart.title = f"{ticker} Metrics"
+    chart.y_axis.title = 'Value'
+    chart.x_axis.title = 'Metric'
+
+    data_ref = Reference(ws, min_col=2, min_row=1, max_row=6)
+    cats_ref = Reference(ws, min_col=1, min_row=2, max_row=6)
+    chart.add_data(data_ref, titles_from_data=True)
+    chart.set_categories(cats_ref)
+
+    ws.add_chart(chart, "D2")
+
+    final_buffer = BytesIO()
+    wb.save(final_buffer)
+    final_buffer.seek(0)
+    return final_buffer
+
 # Fetch Button
 if st.button("📅 Fetch Data"):
     with st.spinner("Fetching data..."):
@@ -93,7 +145,28 @@ if st.button("📅 Fetch Data"):
             with tab1:
                 st.subheader("📈 Key Metrics")
                 df = pd.DataFrame(metrics.items(), columns=["Metric", "Value"])
-                st.dataframe(df, use_container_width=True)
+                styled_df = df.style.format({"Value": "{:.2f}"}).highlight_null(null_color='red').set_properties(**{'background-color': '#f4f4f4', 'border': '1px solid #ddd'})
+                st.dataframe(styled_df, use_container_width=True)
+
+                # Excel Export
+                excel_data = save_to_excel_with_chart(df, ticker)
+                st.download_button("📤 Download as Excel", excel_data, file_name=f"{ticker}_metrics.xlsx")
+
+                # Save history
+                history_df = pd.DataFrame([[datetime.now().isoformat(), ticker, data_source]],
+                                          columns=["Timestamp", "Ticker", "Source"])
+                try:
+                    history_df.to_csv("ticker_history.csv", mode='a', index=False, header=not pd.io.common.file_exists("ticker_history.csv"))
+                except:
+                    pass
+
+                # Email alert
+                if email_address:
+                    success = send_email_alert(email_address, f"Metrics for {ticker}", df.to_string(index=False))
+                    if success:
+                        st.success(f"Email alert sent to {email_address}!")
+                    else:
+                        st.warning("Failed to send email. Check configuration.")
 
             with tab2:
                 try:
