@@ -5,99 +5,95 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import io
 
-# Streamlit page config
-st.set_page_config(page_title="Financial Dashboard", layout="wide")
+# Set Streamlit layout
+st.set_page_config(page_title="📊 Financial Dashboard", layout="wide")
 
-# Sidebar layout
+# Constants
+ALPHA_VANTAGE_API_KEY = "Q8LU981EWC83K7VI"
+
+# Sidebar UI
 st.sidebar.title("⚙️ Settings")
 data_source = st.sidebar.selectbox("Choose Data Source", ["Yahoo Finance", "Alpha Vantage"])
-ticker = st.sidebar.text_input("Stock Ticker (e.g. AAPL or TATAMOTORS.BO)", value="AAPL")
-alpha_key = st.sidebar.text_input("Alpha Vantage API Key", value="Q8LU981EWC83K7VI")
+ticker = st.sidebar.text_input("Enter Stock Ticker", value="AAPL")
 
-# Upload Excel template
-uploaded_template = st.sidebar.file_uploader("Upload Excel Template", type=["xlsx"])
+uploaded_template = st.sidebar.file_uploader("📂 Upload Excel Template", type=["xlsx"])
 
-# Function to fetch data from Yahoo Finance
+# Functions
 def get_yahoo_data(ticker):
     stock = yf.Ticker(ticker)
     info = stock.info
-
-    data = {
+    return {
         "P/E Ratio": info.get("trailingPE", "N/A"),
         "EPS": info.get("trailingEps", "N/A"),
         "EBITDA": info.get("ebitda", "N/A"),
         "Cash Flow": info.get("operatingCashflow", "N/A"),
         "Revenue": info.get("totalRevenue", "N/A")
     }
-    return data
 
-# Function to fetch data from Alpha Vantage
-def get_alpha_data(ticker, api_key):
-    url = f"https://www.alphavantage.co/query?function=OVERVIEW&symbol={ticker}&apikey={api_key}"
+def get_alpha_data(ticker):
+    url = f"https://www.alphavantage.co/query?function=OVERVIEW&symbol={ticker}&apikey={ALPHA_VANTAGE_API_KEY}"
     r = requests.get(url)
     if r.status_code != 200:
         return {}
     info = r.json()
-    data = {
+    return {
         "P/E Ratio": info.get("PERatio", "N/A"),
         "EPS": info.get("EPS", "N/A"),
         "EBITDA": info.get("EBITDA", "N/A"),
         "Cash Flow": info.get("OperatingCashflow", "N/A"),
         "Revenue": info.get("RevenueTTM", "N/A")
     }
-    return data
 
-# Main section
+# Main
 st.title("📊 Financial Dashboard with Excel Integration")
 
-if st.button("🔍 Fetch & Process Data"):
-    with st.spinner("Fetching data..."):
-        # Choose API
+if st.button("📥 Fetch & Process Data"):
+    with st.spinner("Loading data..."):
         if data_source == "Yahoo Finance":
             metrics = get_yahoo_data(ticker)
         else:
-            metrics = get_alpha_data(ticker, alpha_key)
+            metrics = get_alpha_data(ticker)
 
         if not metrics:
-            st.error("Could not retrieve financial data.")
+            st.error("Data fetch failed. Check ticker or try again.")
         else:
-            # Show metrics in a table
-            st.subheader("💡 Valuation Metrics")
+            st.subheader("📈 Valuation Metrics")
             df_metrics = pd.DataFrame(metrics.items(), columns=["Metric", "Value"])
             st.dataframe(df_metrics, use_container_width=True)
 
-            # Chart
-            numeric_vals = {k: v for k, v in metrics.items() if isinstance(v, (int, float))}
-            if numeric_vals:
+            # Visualize
+            try:
+                numeric_vals = {k: float(v) for k, v in metrics.items() if str(v).replace('.', '', 1).isdigit()}
                 fig, ax = plt.subplots()
-                ax.bar(numeric_vals.keys(), numeric_vals.values(), color='skyblue')
-                ax.set_title("Valuation Metrics")
+                ax.bar(numeric_vals.keys(), numeric_vals.values(), color='teal')
+                ax.set_title(f"{ticker.upper()} Metrics")
+                ax.set_ylabel("Value")
                 plt.xticks(rotation=45)
                 st.pyplot(fig)
+            except Exception as e:
+                st.warning(f"Could not generate chart: {e}")
 
-            # Excel Integration
+            # Excel integration
             if uploaded_template:
                 try:
                     df_excel = pd.read_excel(uploaded_template, sheet_name=None)
-
-                    # Update first sheet with metrics
                     first_sheet_name = list(df_excel.keys())[0]
                     df_sheet = df_excel[first_sheet_name]
 
-                    # Append metrics to the bottom of the sheet
+                    # Append metrics
                     metrics_df = pd.DataFrame(metrics.items(), columns=["Metric", "Value"])
-                    new_sheet = pd.concat([df_sheet, pd.DataFrame([[]]), metrics_df], ignore_index=True)
+                    updated_df = pd.concat([df_sheet, pd.DataFrame([[]]), metrics_df], ignore_index=True)
 
-                    # Write updated Excel to buffer
+                    # Save to buffer
                     output = io.BytesIO()
                     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                        new_sheet.to_excel(writer, index=False, sheet_name=first_sheet_name)
+                        updated_df.to_excel(writer, index=False, sheet_name=first_sheet_name)
                     output.seek(0)
 
-                    st.success("✅ Metrics added to Excel successfully!")
-                    st.download_button("📥 Download Updated Excel", data=output, file_name="updated_financial_model.xlsx")
+                    st.success("✅ Excel updated with new metrics!")
+                    st.download_button("📩 Download Updated Excel", data=output, file_name="updated_model.xlsx")
 
                 except Exception as e:
-                    st.error(f"Error processing Excel file: {e}")
+                    st.error(f"Excel update failed: {e}")
             else:
-                st.warning("📎 Please upload an Excel template to embed the metrics.")
+                st.warning("📎 Upload an Excel template to insert metrics.")
