@@ -1,5 +1,5 @@
 streamlit
-openpyxl
+yfinance
 requests
 pandas
-yfinance
+matplotlib
