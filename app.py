@@ -54,7 +54,7 @@ if st.button("📥 Fetch Financials"):
         st.subheader("📌 Key Ratios")
         ratios = data['ratios']
         if isinstance(ratios, list) and len(ratios) > 0:
-            ratio_data = ratios[0]  # First element of the list is the actual dictionary
+            ratio_data = ratios[0]
             formatted_ratios = {
                 "P/E Ratio": ratio_data.get("peRatioTTM", float('nan')),
                 "ROE": ratio_data.get("returnOnEquityTTM", float('nan')),
@@ -63,7 +63,10 @@ if st.button("📥 Fetch Financials"):
                 "EPS": ratio_data.get("epsTTM", float('nan'))
             }
             ratios_df = pd.DataFrame([formatted_ratios])
-            st.dataframe(ratios_df.style.format({col: "{:.2f}" for col in ratios_df.columns}), use_container_width=True)
+            if ratios_df.empty:
+                st.warning("No valid ratios available.")
+            else:
+                st.dataframe(ratios_df.style.format({col: "{:.2f}" for col in ratios_df.columns}), use_container_width=True)
         else:
             st.warning("Ratio data not available or in unexpected format.")
 
@@ -72,7 +75,7 @@ if st.button("📥 Fetch Financials"):
         if data['dcf']:
             try:
                 dcf_value = float(data['dcf'][0]['dcf'])
-                price = float(data['dcf'][0]['Stock Price'])
+                price = float(data['dcf'][0].get('Stock price', 0))
                 st.metric("DCF Value", f"${dcf_value:.2f}", delta=f"Market Price: ${price:.2f}")
             except:
                 st.warning("DCF data parsing error")
@@ -90,16 +93,18 @@ if st.button("📥 Fetch Financials"):
                 st.markdown(f"### {name}")
                 st.dataframe(df.style.format(na_rep="-"), use_container_width=True)
 
-        # Bar Chart - Total Revenue
+        # 📊 Revenue Trend
         st.subheader("📊 Revenue Trend")
         if data['income']:
             df_rev = pd.DataFrame(data['income'])
-            df_rev = df_rev[['date', 'revenue']].dropna()
-            df_rev['revenue'] = pd.to_numeric(df_rev['revenue'])
-            fig = px.bar(df_rev.sort_values(by='date'), x='date', y='revenue', title="Revenue Over Time")
+            rev_col = 'revenue' if 'revenue' in df_rev.columns else 'totalRevenue'
+            df_rev = df_rev[['date', rev_col]].dropna()
+            df_rev[rev_col] = pd.to_numeric(df_rev[rev_col], errors='coerce')
+            df_rev = df_rev.sort_values(by='date')
+            fig = px.bar(df_rev, x='date', y=rev_col, title="Revenue Over Time")
             st.plotly_chart(fig, use_container_width=True)
 
-        # Historical Stock Price Line Chart
+        # 📉 Historical Stock Price
         st.subheader("📉 Historical Stock Price")
         if data['price'] and 'historical' in data['price']:
             df_price = pd.DataFrame(data['price']['historical'])
@@ -107,7 +112,7 @@ if st.button("📥 Fetch Financials"):
             fig_line = px.line(df_price, x='date', y='close', title=f"{ticker} Stock Price")
             st.plotly_chart(fig_line, use_container_width=True)
 
-        # Excel Export of Full Financials
+        # 📤 Export to Excel
         st.subheader("📤 Export to Excel")
         with BytesIO() as buffer:
             with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
