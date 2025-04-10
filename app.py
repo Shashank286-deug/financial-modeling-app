@@ -21,9 +21,6 @@ st.title("📊 Financial Model & Valuation Dashboard")
 # Sidebar
 ticker = st.sidebar.text_input("Enter Ticker (e.g., AAPL, MSFT)", value="AAPL")
 
-# Sector Metric Choice
-sector_metric = st.sidebar.selectbox("Sector Comparison Metric", ["revenue", "returnOnEquityTTM", "epsTTM"], index=0, format_func=lambda x: {"revenue": "Revenue", "returnOnEquityTTM": "ROE", "epsTTM": "EPS"}[x])
-
 # Function to fetch financial data from FMP
 @st.cache_data(ttl=3600)
 def get_fmp_financials(ticker):
@@ -31,12 +28,12 @@ def get_fmp_financials(ticker):
     suffix = f"?apikey={FMP_API_KEY}"
 
     endpoints = {
+        "profile": f"/profile/{ticker}{suffix}",
         "income": f"/income-statement/{ticker}?limit=5{suffix}",
         "balance": f"/balance-sheet-statement/{ticker}?limit=5{suffix}",
         "cashflow": f"/cash-flow-statement/{ticker}?limit=5{suffix}",
         "ratios": f"/ratios-ttm/{ticker}{suffix}",
         "dcf": f"/discounted-cash-flow/{ticker}{suffix}",
-        "profile": f"/profile/{ticker}{suffix}",
         "price": f"/historical-price-full/{ticker}?serietype=line&timeseries=365{suffix}"
     }
 
@@ -48,26 +45,6 @@ def get_fmp_financials(ticker):
         else:
             data[key] = []
     return data
-
-# Function to fetch sector peers and ratios
-@st.cache_data(ttl=3600)
-def get_sector_comparison(sector, metric):
-    url = f"https://financialmodelingprep.com/api/v3/stock-screener?sector={sector}&limit=10&apikey={FMP_API_KEY}"
-    r = requests.get(url)
-    if r.status_code != 200:
-        return pd.DataFrame()
-    companies = r.json()
-    result = []
-    for company in companies:
-        ticker = company['symbol']
-        name = company['companyName']
-        ratio_url = f"https://financialmodelingprep.com/api/v3/ratios-ttm/{ticker}?apikey={FMP_API_KEY}"
-        res = requests.get(ratio_url)
-        if res.status_code == 200 and res.json():
-            val = res.json()[0].get(metric, None)
-            if val is not None:
-                result.append({"Company": name, "Value": val})
-    return pd.DataFrame(result)
 
 # Fallback using yfinance
 @st.cache_data(ttl=3600)
@@ -83,6 +60,18 @@ def get_yahoo_data(ticker):
 if st.button("📥 Fetch Financials"):
     with st.spinner("Loading data from FMP..."):
         data = get_fmp_financials(ticker)
+
+        # Company Overview
+        st.subheader("🏢 Company Overview")
+        profile = data.get("profile", [])
+        if profile and isinstance(profile, list):
+            company = profile[0]
+            st.markdown(f"### {ticker} ({company.get('companyName', 'N/A')})")
+            st.markdown(f"**Industry:** {company.get('industry', 'N/A')}  ")
+            st.markdown(f"**Sector:** {company.get('sector', 'N/A')}  ")
+            st.markdown(f"**Founded:** {company.get('ipoDate', 'N/A')}  ")
+        else:
+            st.warning("Company profile not available.")
 
         # Display Key Ratios
         st.subheader("📌 Key Ratios")
@@ -154,20 +143,6 @@ if st.button("📥 Fetch Financials"):
                 st.plotly_chart(fig_yahoo, use_container_width=True)
             else:
                 st.error("Could not fetch stock data from Yahoo Finance either.")
-
-        # Sector Comparison
-        if data.get('profile') and isinstance(data['profile'], list):
-            company_sector = data['profile'][0].get('sector')
-            if company_sector:
-                st.subheader("🏢 Sector Comparison")
-                sector_df = get_sector_comparison(company_sector, sector_metric)
-                if not sector_df.empty:
-                    fig_sector = px.bar(sector_df.sort_values("Value", ascending=False), x="Company", y="Value",
-                                        title=f"Sector Comparison - {sector_metric.upper()}", color="Value",
-                                        color_continuous_scale="Viridis")
-                    st.plotly_chart(fig_sector, use_container_width=True)
-                else:
-                    st.warning("Unable to fetch sector comparison data.")
 
         # Excel Export of Full Financials
         st.subheader("📤 Export to Excel")
