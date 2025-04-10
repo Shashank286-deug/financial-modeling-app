@@ -18,44 +18,25 @@ FMP_API_KEY = st.secrets["FMP_API_KEY"]
 st.set_page_config(page_title="Financial Dashboard", layout="wide")
 st.title("📊 Financial Model & Valuation Dashboard")
 
-# Sidebar Watchlist Initialization
+# Sidebar
+st.sidebar.header("Watchlist")
 if "watchlist" not in st.session_state:
-    st.session_state.watchlist = ["AAPL", "MSFT"]
+    st.session_state.watchlist = []
 
-st.sidebar.markdown("## 🧾 Core Watchlist")
+add_ticker = st.sidebar.text_input("Add Ticker to Watchlist")
+if st.sidebar.button("➕ Add"):
+    if add_ticker and add_ticker.upper() not in st.session_state.watchlist:
+        st.session_state.watchlist.append(add_ticker.upper())
 
-# Add company to watchlist
-new_symbol = st.sidebar.text_input("🔍 Add a company to Watchlist", placeholder="Enter Ticker (e.g., GOOG)")
-if st.sidebar.button("➕ Add Company"):
-    if new_symbol.upper() not in st.session_state.watchlist and new_symbol.strip():
-        st.session_state.watchlist.append(new_symbol.upper())
-        st.sidebar.success(f"{new_symbol.upper()} added to watchlist!")
+remove_ticker = st.sidebar.selectbox("Remove Ticker", options=st.session_state.watchlist if st.session_state.watchlist else ["None"])
+if st.sidebar.button("➖ Remove") and remove_ticker != "None":
+    st.session_state.watchlist.remove(remove_ticker)
 
-# Display watchlist and select ticker
-selected_watch = st.sidebar.selectbox("📂 Select Company from Watchlist", st.session_state.watchlist)
-ticker = selected_watch
+st.sidebar.subheader("Your Watchlist")
+st.sidebar.write(st.session_state.watchlist)
 
-# Watchlist Summary Section
-st.markdown("## 📋 Watchlist Summary")
-summary_data = []
-for sym in st.session_state.watchlist:
-    try:
-        yf_data = yf.Ticker(sym).info
-        summary_data.append({
-            "Ticker": sym,
-            "Price": yf_data.get("currentPrice", "NA"),
-            "Change": yf_data.get("regularMarketChangePercent", "NA"),
-            "PE Ratio": yf_data.get("trailingPE", "NA"),
-        })
-    except:
-        summary_data.append({
-            "Ticker": sym, "Price": "Error", "Change": "Error", "PE Ratio": "Error"
-        })
-
-summary_df = pd.DataFrame(summary_data)
-st.dataframe(summary_df.style.format({
-    "Price": "{:.2f}", "Change": "{:.2%}", "PE Ratio": "{:.2f}"
-}), use_container_width=True)
+# Default ticker selection
+ticker = st.sidebar.selectbox("Select a Ticker", options=st.session_state.watchlist if st.session_state.watchlist else ["AAPL"])
 
 # Function to fetch financial data from FMP
 @st.cache_data(ttl=3600)
