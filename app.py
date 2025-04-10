@@ -1,41 +1,40 @@
 import streamlit as st
-import requests
 import pandas as pd
+import requests
 import plotly.express as px
 from io import BytesIO
 from datetime import datetime
 import openpyxl
 from openpyxl.chart import BarChart, Reference
 
-# Set Streamlit page config
-st.set_page_config(page_title="Financial Dashboard", layout="wide")
+# Streamlit Page Config
+st.set_page_config(page_title="📊 Financial Dashboard", layout="wide")
 st.title("📊 Financial Model & Valuation Dashboard")
 
-# Sidebar options
-st.sidebar.header("Settings")
-data_source = st.sidebar.selectbox("Choose Data Source", ["FMP"])
+# Sidebar Inputs
+api_key = st.sidebar.text_input("Enter your FMP API Key", type="password")
 ticker = st.sidebar.text_input("Enter Stock Ticker", value="AAPL")
 
-# Replace with your FMP API key
-FMP_API_KEY = "uPJt4YPx3t5TRmcCpS7emobdeRLAngRG"
+# Helper Functions
+def fetch_fmp_data(endpoint, ticker, api_key):
+    url = f"https://financialmodelingprep.com/api/v3/{endpoint}/{ticker}?apikey={api_key}"
+    r = requests.get(url)
+    if r.status_code == 200:
+        return r.json()
+    return None
 
-def get_fmp_data(ticker):
-    url = f"https://financialmodelingprep.com/api/v3/profile/{ticker}?apikey={FMP_API_KEY}"
-    response = requests.get(url)
-    if response.status_code != 200:
-        return {}
-    data = response.json()
-    if not data:
-        return {}
-    item = data[0]
-    return {
-        "Company Name": item.get("companyName", "N/A"),
-        "P/E Ratio": item.get("pe", "N/A"),
-        "EPS": item.get("eps", "N/A"),
-        "Market Cap": item.get("mktCap", "N/A"),
-        "Industry": item.get("industry", "N/A"),
-        "Exchange": item.get("exchange", "N/A")
+def parse_key_metrics(data):
+    metrics = {
+        "P/E Ratio": data.get("peRatio", "N/A"),
+        "EPS": data.get("eps", "N/A"),
+        "EBITDA": data.get("ebitda", "N/A"),
+        "Revenue": data.get("revenue", "N/A"),
+        "Cash Flow": data.get("freeCashFlow", "N/A"),
+        "ROE": data.get("roe", "N/A"),
+        "ROA": data.get("roa", "N/A"),
+        "Debt/Equity": data.get("debtEquityRatio", "N/A")
     }
+    return metrics
 
 def save_to_excel_with_chart(df, ticker):
     buffer = BytesIO()
@@ -53,41 +52,54 @@ def save_to_excel_with_chart(df, ticker):
     cats_ref = Reference(ws, min_col=1, min_row=2, max_row=len(df)+1)
     chart.add_data(data_ref, titles_from_data=True)
     chart.set_categories(cats_ref)
-
-    ws.add_chart(chart, "E2")
+    ws.add_chart(chart, "D2")
 
     final_buffer = BytesIO()
     wb.save(final_buffer)
     final_buffer.seek(0)
     return final_buffer
 
-if st.button("🔍 Fetch Data"):
-    if data_source == "FMP":
-        data = get_fmp_data(ticker)
+# Main
+if st.button("📥 Fetch & Visualize Data"):
+    if not api_key:
+        st.warning("Please enter a valid FMP API Key.")
+    else:
+        with st.spinner("Fetching data from FMP..."):
+            profile = fetch_fmp_data("profile", ticker, api_key)
+            ratios = fetch_fmp_data("ratios-ttm", ticker, api_key)
+            income = fetch_fmp_data("income-statement", ticker, api_key)
+            balance = fetch_fmp_data("balance-sheet-statement", ticker, api_key)
+            cashflow = fetch_fmp_data("cash-flow-statement", ticker, api_key)
 
-        if not data:
-            st.error("No data found. Please check the ticker symbol.")
-        else:
-            st.subheader("📋 Key Metrics")
-            df = pd.DataFrame(data.items(), columns=["Metric", "Value"])
+            if profile and len(profile) > 0 and ratios and len(ratios) > 0:
+                data = profile[0]
+                metrics = parse_key_metrics(ratios[0])
 
-            try:
-                styled_df = df.style.format({"Value": "{:.2f}"}).highlight_null(null_color='red').set_properties(**{'text-align': 'center'})
-                st.dataframe(styled_df, use_container_width=True)
-            except:
-                st.dataframe(df, use_container_width=True)
+                tab1, tab2, tab3 = st.tabs(["📈 Key Metrics", "📊 Visualizations", "📁 Financial Statements"])
 
-            # Plotly Visualization
-            try:
-                numeric_df = df.copy()
-                numeric_df["Value"] = pd.to_numeric(numeric_df["Value"], errors='coerce')
-                numeric_df.dropna(inplace=True)
+                with tab1:
+                    df = pd.DataFrame(metrics.items(), columns=["Metric", "Value"])
+                    st.dataframe(df.style.set_precision(2), use_container_width=True)
 
-                fig = px.bar(numeric_df, x="Metric", y="Value", color="Metric", title=f"{ticker.upper()} - Key Metrics")
-                st.plotly_chart(fig, use_container_width=True)
-            except:
-                st.warning("Could not generate visualization.")
+                    excel_data = save_to_excel_with_chart(df, ticker)
+                    st.download_button("📤 Download Metrics Excel", excel_data, file_name=f"{ticker}_metrics.xlsx")
 
-            # Excel Export
-            excel_data = save_to_excel_with_chart(df, ticker)
-            st.download_button("📥 Download Excel", data=excel_data, file_name=f"{ticker}_metrics.xlsx")
+                with tab2:
+                    try:
+                        numeric_data = [(k, float(v)) for k, v in metrics.items() if v != "N/A"]
+                        if numeric_data:
+                            labels, values = zip(*numeric_data)
+                            fig = px.bar(x=labels, y=values, title=f"{ticker} - Key Financial Metrics")
+                            st.plotly_chart(fig, use_container_width=True)
+                    except:
+                        st.warning("Unable to create visualization.")
+
+                with tab3:
+                    st.subheader("📜 Income Statement")
+                    st.dataframe(pd.DataFrame(income[:1]))
+                    st.subheader("🏦 Balance Sheet")
+                    st.dataframe(pd.DataFrame(balance[:1]))
+                    st.subheader("💸 Cash Flow Statement")
+                    st.dataframe(pd.DataFrame(cashflow[:1]))
+            else:
+                st.error("Failed to fetch data. Check ticker symbol and API key.")
