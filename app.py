@@ -46,10 +46,13 @@ if st.button("🔄 Fetch Data"):
     st.subheader("📉 Key Metrics")
 
     if not df.empty and "Value" in df.columns:
-        styled_df = df.style.format({"Value": "{:.2f}"}).highlight_null(null_color='red').set_properties(**{'text-align': 'center'})
-        st.dataframe(styled_df)
-    else:
-        st.warning("No data available or 'Value' column missing. Please try a different ticker or source.")
+        if not df.empty and "Value" in df.columns:
+    styled_df = df.style.format({"Value": "{:.2f}"}).highlight_null(null_color='red').set_properties(**{'text-align': 'center'})
+    st.dataframe(styled_df, use_container_width=True)
+else:
+    st.warning("⚠️ No data available to display. Please check the stock ticker or try a different data source.")
+    st.dataframe(df)  # Optional: show what was returned, even if empty or malformed
+
 
     # Optional Debug
     # st.write("Raw DF:")
