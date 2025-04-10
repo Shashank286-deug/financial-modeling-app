@@ -9,6 +9,7 @@ from io import BytesIO
 from datetime import datetime
 import openpyxl
 from openpyxl.chart import BarChart, Reference
+from tradingview_ta import TA_Handler, Interval, Exchange
 
 # Load FMP API key securely from Streamlit secrets
 FMP_API_KEY = st.secrets["FMP_API_KEY"]
@@ -18,7 +19,9 @@ st.title("📊 Financial Model & Valuation Dashboard")
 
 # Sidebar
 st.sidebar.header("Settings")
-user_ticker_input = st.sidebar.text_input("Enter Ticker Symbol (e.g., AAPL)", value="AAPL").upper()
+ticker_list = ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA"]
+ticker_input = st.sidebar.text_input("Enter Ticker Symbol", value="AAPL").upper()
+ticker = ticker_input if ticker_input else "AAPL"
 
 # Function to fetch financial data from FMP
 @st.cache_data(ttl=3600)
@@ -44,10 +47,23 @@ def get_fmp_financials(ticker):
             data[key] = []
     return data
 
+# Function to fetch TradingView data
+def get_tradingview_analysis(ticker):
+    try:
+        handler = TA_Handler(
+            symbol=ticker,
+            screener="america",
+            exchange="NASDAQ",
+            interval=Interval.INTERVAL_1_DAY
+        )
+        return handler.get_analysis()
+    except Exception as e:
+        return str(e)
+
 # Fetch Button
 if st.button("📥 Fetch Financials"):
     with st.spinner("Loading data from FMP..."):
-        data = get_fmp_financials(user_ticker_input)
+        data = get_fmp_financials(ticker)
 
         # Display Key Ratios
         st.subheader("📌 Key Ratios")
@@ -93,20 +109,27 @@ if st.button("📥 Fetch Financials"):
         st.subheader("📊 Revenue Trend")
         if data['income']:
             df_rev = pd.DataFrame(data['income'])
-            rev_col = 'revenue' if 'revenue' in df_rev.columns else 'totalRevenue'
-            if rev_col in df_rev.columns:
-                df_rev = df_rev[['date', rev_col]].dropna()
-                df_rev[rev_col] = pd.to_numeric(df_rev[rev_col])
-                fig = px.bar(df_rev.sort_values(by='date'), x='date', y=rev_col, title="Revenue Over Time")
-                st.plotly_chart(fig, use_container_width=True)
+            df_rev = df_rev[['date', 'revenue']].dropna()
+            df_rev['revenue'] = pd.to_numeric(df_rev['revenue'])
+            fig = px.bar(df_rev.sort_values(by='date'), x='date', y='revenue', title="Revenue Over Time")
+            st.plotly_chart(fig, use_container_width=True)
 
         # Historical Stock Price Line Chart
         st.subheader("📉 Historical Stock Price")
         if data['price'] and 'historical' in data['price']:
             df_price = pd.DataFrame(data['price']['historical'])
             df_price['date'] = pd.to_datetime(df_price['date'])
-            fig_line = px.line(df_price, x='date', y='close', title=f"{user_ticker_input} Stock Price")
+            fig_line = px.line(df_price, x='date', y='close', title=f"{ticker} Stock Price")
             st.plotly_chart(fig_line, use_container_width=True)
+
+        # TradingView Analysis
+        st.subheader("🔍 TradingView Technical Summary")
+        tv_analysis = get_tradingview_analysis(ticker)
+        if isinstance(tv_analysis, str):
+            st.error(f"TradingView Error: {tv_analysis}")
+        else:
+            st.json(tv_analysis.summary)
+            st.json(tv_analysis.moving_averages)
 
         # Excel Export of Full Financials
         st.subheader("📤 Export to Excel")
@@ -116,4 +139,4 @@ if st.button("📥 Fetch Financials"):
                 pd.DataFrame(data['balance']).to_excel(writer, sheet_name="Balance", index=False)
                 pd.DataFrame(data['cashflow']).to_excel(writer, sheet_name="Cash Flow", index=False)
                 pd.DataFrame([ratios[0]] if isinstance(ratios, list) and ratios else [{}]).to_excel(writer, sheet_name="Ratios", index=False)
-            st.download_button("💾 Download Full Financials", buffer.getvalue(), file_name=f"{user_ticker_input}_financials.xlsx")
+            st.download_button("💾 Download Full Financials", buffer.getvalue(), file_name=f"{ticker}_financials.xlsx")
