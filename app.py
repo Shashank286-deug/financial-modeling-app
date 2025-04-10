@@ -1,41 +1,67 @@
 import streamlit as st
-import pandas as pd
+import yfinance as yf
 import requests
+import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
 import plotly.express as px
+import smtplib
+from email.message import EmailMessage
 from io import BytesIO
 from datetime import datetime
 import openpyxl
 from openpyxl.chart import BarChart, Reference
 
-# Streamlit Page Config
-st.set_page_config(page_title="📊 Financial Dashboard", layout="wide")
+# Set Streamlit page config
+st.set_page_config(page_title="Financial Dashboard", layout="wide")
 st.title("📊 Financial Model & Valuation Dashboard")
 
-# Sidebar Inputs
-api_key = st.sidebar.text_input("Enter your FMP API Key", type="password")
+# Sidebar Configuration
+st.sidebar.header("Settings")
+data_source = st.sidebar.selectbox("Choose Data Source", ["Yahoo Finance", "FMP"])
 ticker = st.sidebar.text_input("Enter Stock Ticker", value="AAPL")
+fmp_api_key = st.sidebar.text_input("Enter your FMP API Key", type="password")
 
-# Helper Functions
-def fetch_fmp_data(endpoint, ticker, api_key):
-    url = f"https://financialmodelingprep.com/api/v3/{endpoint}/{ticker}?apikey={api_key}"
-    r = requests.get(url)
-    if r.status_code == 200:
-        return r.json()
-    return None
-
-def parse_key_metrics(data):
-    metrics = {
-        "P/E Ratio": data.get("peRatio", "N/A"),
-        "EPS": data.get("eps", "N/A"),
-        "EBITDA": data.get("ebitda", "N/A"),
-        "Revenue": data.get("revenue", "N/A"),
-        "Cash Flow": data.get("freeCashFlow", "N/A"),
-        "ROE": data.get("roe", "N/A"),
-        "ROA": data.get("roa", "N/A"),
-        "Debt/Equity": data.get("debtEquityRatio", "N/A")
+# Yahoo Finance Function
+def get_yahoo_data(ticker):
+    stock = yf.Ticker(ticker)
+    info = stock.info
+    data = {
+        "P/E Ratio": info.get("trailingPE", "N/A"),
+        "EPS": info.get("trailingEps", "N/A"),
+        "ROE": info.get("returnOnEquity", "N/A"),
+        "ROA": info.get("returnOnAssets", "N/A"),
+        "Debt/Equity": info.get("debtToEquity", "N/A")
     }
-    return metrics
+    return data
 
+# FMP API Function
+def get_fmp_data(ticker, api_key):
+    base_url = "https://financialmodelingprep.com/api/v3"
+    endpoints = {
+        "key_metrics": f"{base_url}/key-metrics-ttm/{ticker}?apikey={api_key}",
+        "ratios": f"{base_url}/ratios-ttm/{ticker}?apikey={api_key}",
+        "dcf": f"{base_url}/discounted-cash-flow/{ticker}?apikey={api_key}"
+    }
+    data = {}
+    try:
+        km = requests.get(endpoints["key_metrics"]).json()[0]
+        rt = requests.get(endpoints["ratios"]).json()[0]
+        dcf = requests.get(endpoints["dcf"]).json()
+
+        data = {
+            "P/E Ratio": km.get("peRatioTTM", "N/A"),
+            "EPS": km.get("epsTTM", "N/A"),
+            "ROE": rt.get("returnOnEquityTTM", "N/A"),
+            "ROA": rt.get("returnOnAssetsTTM", "N/A"),
+            "Debt/Equity": rt.get("debtEquityRatioTTM", "N/A"),
+            "DCF Valuation": dcf.get("dcf", "N/A") if isinstance(dcf, dict) else dcf[0].get("dcf", "N/A")
+        }
+    except Exception as e:
+        st.error(f"Failed to fetch from FMP: {e}")
+    return data
+
+# Excel Export with chart
 def save_to_excel_with_chart(df, ticker):
     buffer = BytesIO()
     df.to_excel(buffer, index=False, sheet_name="Metrics")
@@ -59,47 +85,54 @@ def save_to_excel_with_chart(df, ticker):
     final_buffer.seek(0)
     return final_buffer
 
-# Main
-if st.button("📥 Fetch & Visualize Data"):
-    if not api_key:
-        st.warning("Please enter a valid FMP API Key.")
+# Fetch Button
+if st.button("📅 Fetch Data"):
+    if not ticker:
+        st.warning("Please enter a valid stock ticker.")
     else:
-        with st.spinner("Fetching data from FMP..."):
-            profile = fetch_fmp_data("profile", ticker, api_key)
-            ratios = fetch_fmp_data("ratios-ttm", ticker, api_key)
-            income = fetch_fmp_data("income-statement", ticker, api_key)
-            balance = fetch_fmp_data("balance-sheet-statement", ticker, api_key)
-            cashflow = fetch_fmp_data("cash-flow-statement", ticker, api_key)
+        if data_source == "Yahoo Finance":
+            metrics = get_yahoo_data(ticker)
+        elif data_source == "FMP":
+            if not fmp_api_key:
+                st.warning("Please enter a valid FMP API key.")
+                st.stop()
+            metrics = get_fmp_data(ticker, fmp_api_key)
+        else:
+            metrics = {}
 
-            if profile and len(profile) > 0 and ratios and len(ratios) > 0:
-                data = profile[0]
-                metrics = parse_key_metrics(ratios[0])
+        if not metrics:
+            st.error("No data found.")
+        else:
+            tab1, tab2, tab3 = st.tabs(["📈 Metrics Table", "📊 Visualizations", "📉 Historical Price"])
 
-                tab1, tab2, tab3 = st.tabs(["📈 Key Metrics", "📊 Visualizations", "📁 Financial Statements"])
+            with tab1:
+                df = pd.DataFrame(metrics.items(), columns=["Metric", "Value"])
+                st.dataframe(df, use_container_width=True)
+                excel_data = save_to_excel_with_chart(df, ticker)
+                st.download_button("📤 Download Excel", excel_data, file_name=f"{ticker}_metrics.xlsx")
 
-                with tab1:
-                    df = pd.DataFrame(metrics.items(), columns=["Metric", "Value"])
-                    st.dataframe(df.style.set_precision(2), use_container_width=True)
-
-                    excel_data = save_to_excel_with_chart(df, ticker)
-                    st.download_button("📤 Download Metrics Excel", excel_data, file_name=f"{ticker}_metrics.xlsx")
-
-                with tab2:
+            with tab2:
+                values, labels = [], []
+                for k, v in metrics.items():
                     try:
-                        numeric_data = [(k, float(v)) for k, v in metrics.items() if v != "N/A"]
-                        if numeric_data:
-                            labels, values = zip(*numeric_data)
-                            fig = px.bar(x=labels, y=values, title=f"{ticker} - Key Financial Metrics")
-                            st.plotly_chart(fig, use_container_width=True)
+                        val = float(v)
+                        values.append(val)
+                        labels.append(k)
                     except:
-                        st.warning("Unable to create visualization.")
+                        continue
 
-                with tab3:
-                    st.subheader("📜 Income Statement")
-                    st.dataframe(pd.DataFrame(income[:1]))
-                    st.subheader("🏦 Balance Sheet")
-                    st.dataframe(pd.DataFrame(balance[:1]))
-                    st.subheader("💸 Cash Flow Statement")
-                    st.dataframe(pd.DataFrame(cashflow[:1]))
-            else:
-                st.error("Failed to fetch data. Check ticker symbol and API key.")
+                if values:
+                    fig = px.bar(x=labels, y=values, labels={'x': 'Metric', 'y': 'Value'},
+                                 title=f"{ticker.upper()} - Key Financial Metrics",
+                                 color=labels, color_discrete_sequence=px.colors.sequential.Teal)
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.info("No numeric metrics for plotting.")
+
+            with tab3:
+                try:
+                    hist = yf.Ticker(ticker).history(period="1y")
+                    fig = px.line(hist, x=hist.index, y="Close", title=f"{ticker} - 1Y Price History")
+                    st.plotly_chart(fig, use_container_width=True)
+                except:
+                    st.warning("Could not fetch historical prices.")
