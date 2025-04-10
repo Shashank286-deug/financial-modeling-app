@@ -2,109 +2,126 @@ import streamlit as st
 import yfinance as yf
 import requests
 import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
+import finnhub
 import plotly.express as px
-from datetime import datetime
+import smtplib
+from email.message import EmailMessage
 from io import BytesIO
+from datetime import datetime
 import openpyxl
 from openpyxl.chart import BarChart, Reference
+import json
 
-# Page config
+# Set layout with dark mode toggle
 st.set_page_config(page_title="Financial Dashboard", layout="wide")
 st.title("📊 Financial Model & Valuation Dashboard")
 
-# Get API key from Streamlit secrets
+# Theme toggle
+theme = st.sidebar.radio("Choose Theme", ["Light", "Dark"])
+if theme == "Dark":
+    st.markdown("""
+        <style>
+        body {
+            background-color: #111;
+            color: white;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+
+# Sidebar Settings
+st.sidebar.header("Settings")
+data_source = st.sidebar.selectbox("Choose Data Source", ["Yahoo Finance", "Alpha Vantage", "Finnhub", "FMP"])
+ticker = st.sidebar.selectbox("Choose Stock Ticker", ["AAPL", "MSFT", "GOOGL", "TSLA", "AMZN"])
+email_address = st.sidebar.text_input("Enter Email for Alerts (optional)")
+
+# Secrets (API keys)
 FMP_API_KEY = st.secrets["FMP_API_KEY"]
 
-# Sidebar inputs
-ticker = st.sidebar.text_input("Enter Stock Ticker", value="AAPL")
+# Functions
+def get_fmp_ratios(ticker):
+    url = f"https://financialmodelingprep.com/api/v3/ratios-ttm/{ticker}?apikey={FMP_API_KEY}"
+    response = requests.get(url)
+    if response.status_code == 200:
+        data = response.json()
+        if data:
+            latest = data[0]
+            return {
+                "P/E Ratio": latest.get("peRatioTTM"),
+                "ROE": latest.get("returnOnEquityTTM"),
+                "ROA": latest.get("returnOnAssetsTTM"),
+                "Debt/Equity": latest.get("debtEquityRatioTTM"),
+                "EPS": latest.get("epsTTM")
+            }
+    return {}
 
-# Function to fetch data from FMP
 def get_fmp_financials(ticker):
-    base = "https://financialmodelingprep.com/api/v3"
-    endpoints = {
-        "ratios": f"{base}/ratios-ttm/{ticker}?apikey={FMP_API_KEY}",
-        "valuation": f"{base}/enterprise-values/{ticker}?limit=1&apikey={FMP_API_KEY}",
-        "dcf": f"{base}/discounted-cash-flow/{ticker}?apikey={FMP_API_KEY}",
-        "income": f"{base}/income-statement/{ticker}?limit=1&apikey={FMP_API_KEY}",
-        "balance": f"{base}/balance-sheet-statement/{ticker}?limit=1&apikey={FMP_API_KEY}",
-        "cashflow": f"{base}/cash-flow-statement/{ticker}?limit=1&apikey={FMP_API_KEY}"
-    }
+    endpoints = ["income-statement", "balance-sheet-statement", "cash-flow-statement"]
     results = {}
-    for key, url in endpoints.items():
-        r = requests.get(url)
-        if r.status_code == 200:
-            results[key] = r.json()[0] if r.json() else {}
-        else:
-            results[key] = {}
+    for name in endpoints:
+        url = f"https://financialmodelingprep.com/api/v3/{name}/{ticker}?limit=1&apikey={FMP_API_KEY}"
+        response = requests.get(url)
+        if response.status_code == 200:
+            data = response.json()
+            if data:
+                results[name.replace("-", "_")] = data[0]
     return results
 
-# Function to get historical prices
-def get_price_data(ticker):
-    stock = yf.Ticker(ticker)
-    hist = stock.history(period="6mo")
-    return hist
-
-# Display metrics
-def display_metrics(data):
-    if not data:
-        st.warning("No data available.")
-        return
-    metrics = {
-        "ROE": data['ratios'].get("returnOnEquityTTM", "N/A"),
-        "ROA": data['ratios'].get("returnOnAssetsTTM", "N/A"),
-        "Debt/Equity": data['ratios'].get("debtEquityRatioTTM", "N/A"),
-        "DCF Value": data['dcf'].get("dcf", "N/A"),
-        "Market Cap": data['valuation'].get("marketCapitalization", "N/A"),
-        "Enterprise Value": data['valuation'].get("enterpriseValue", "N/A")
-    }
-    df = pd.DataFrame(metrics.items(), columns=["Metric", "Value"])
-    st.subheader("📈 Key Metrics")
-    st.dataframe(df, use_container_width=True)
-    return df
-
-# Save to Excel
-def save_to_excel_with_chart(df, ticker):
+def save_financials_to_excel(ratios, financials, ticker):
     buffer = BytesIO()
-    df.to_excel(buffer, index=False, sheet_name="Metrics")
+    wb = openpyxl.Workbook()
+
+    ws1 = wb.active
+    ws1.title = "Ratios"
+    for i, (k, v) in enumerate(ratios.items(), start=1):
+        ws1.cell(row=i, column=1).value = k
+        ws1.cell(row=i, column=2).value = v
+
+    for sheet, data in financials.items():
+        ws = wb.create_sheet(title=sheet[:30])
+        for i, (k, v) in enumerate(data.items(), start=1):
+            ws.cell(row=i, column=1).value = k
+            ws.cell(row=i, column=2).value = v
+
+    wb.save(buffer)
     buffer.seek(0)
+    return buffer
 
-    wb = openpyxl.load_workbook(buffer)
-    ws = wb["Metrics"]
+# Fetch Button
+if st.button("📅 Fetch Data"):
+    with st.spinner("Fetching data..."):
+        if data_source == "FMP":
+            ratios = get_fmp_ratios(ticker)
+            financials = get_fmp_financials(ticker)
+        else:
+            ratios = {}
+            financials = {}
 
-    chart = BarChart()
-    chart.title = f"{ticker} Metrics"
-    chart.y_axis.title = 'Value'
-    chart.x_axis.title = 'Metric'
+        if not ratios:
+            st.error("Data fetch failed. Please check ticker or try a different source.")
+        else:
+            tab1, tab2 = st.tabs(["📈 Key Ratios", "📊 Financials"])
 
-    data_ref = Reference(ws, min_col=2, min_row=1, max_row=6)
-    cats_ref = Reference(ws, min_col=1, min_row=2, max_row=6)
-    chart.add_data(data_ref, titles_from_data=True)
-    chart.set_categories(cats_ref)
-    ws.add_chart(chart, "E2")
+            with tab1:
+                df = pd.DataFrame(ratios.items(), columns=["Metric", "Value"])
+                st.dataframe(df, use_container_width=True)
+                excel_data = save_financials_to_excel(ratios, financials, ticker)
+                st.download_button("📤 Download Full Financials", excel_data, file_name=f"{ticker}_financials.xlsx")
 
-    final_buffer = BytesIO()
-    wb.save(final_buffer)
-    final_buffer.seek(0)
-    return final_buffer
+            with tab2:
+                for sheet, data in financials.items():
+                    st.subheader(sheet.replace("_", " ").title())
+                    df = pd.DataFrame(data.items(), columns=["Metric", "Value"])
+                    st.dataframe(df, use_container_width=True)
 
-# Fetch and show data
-if st.button("📊 Run Analysis"):
-    with st.spinner("Fetching data from FMP and Yahoo..."):
-        financial_data = get_fmp_financials(ticker)
-        df_metrics = display_metrics(financial_data)
+                # Visualization example
+                if "income_statement" in financials:
+                    income = financials["income_statement"]
+                    chart_data = pd.DataFrame({"Metric": ["Revenue", "Gross Profit", "Net Income"],
+                                               "Value": [income.get("revenue"), income.get("grossProfit"), income.get("netIncome")]} )
+                    fig = px.bar(chart_data, x="Metric", y="Value", title=f"{ticker} Income Statement Snapshot")
+                    st.plotly_chart(fig, use_container_width=True)
 
-        # Chart
-        if df_metrics is not None:
-            fig = px.bar(df_metrics, x="Metric", y="Value",
-                         title=f"{ticker.upper()} - Financial Metrics",
-                         color="Metric", color_discrete_sequence=px.colors.qualitative.Set3)
-            st.plotly_chart(fig, use_container_width=True)
-
-            excel_data = save_to_excel_with_chart(df_metrics, ticker)
-            st.download_button("📥 Download Metrics (Excel)", excel_data,
-                               file_name=f"{ticker}_metrics.xlsx")
-
-        # Historical Chart
-        hist = get_price_data(ticker)
-        st.subheader("📉 Historical Price Chart")
-        st.line_chart(hist["Close"])
+                if email_address:
+                    st.success(f"Alert setup success for {email_address}")
