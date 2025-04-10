@@ -20,6 +20,7 @@ st.title("📊 Financial Model & Valuation Dashboard")
 
 # Sidebar
 ticker = st.sidebar.text_input("Enter Ticker (e.g., AAPL, MSFT)", value="AAPL")
+benchmark_ticker = st.sidebar.text_input("Enter Benchmark Ticker (optional)", value="SPY")
 
 # Function to fetch financial data from FMP
 @st.cache_data(ttl=3600)
@@ -28,13 +29,13 @@ def get_fmp_financials(ticker):
     suffix = f"?apikey={FMP_API_KEY}"
 
     endpoints = {
-        "profile": f"/profile/{ticker}{suffix}",
         "income": f"/income-statement/{ticker}?limit=5{suffix}",
         "balance": f"/balance-sheet-statement/{ticker}?limit=5{suffix}",
         "cashflow": f"/cash-flow-statement/{ticker}?limit=5{suffix}",
         "ratios": f"/ratios-ttm/{ticker}{suffix}",
         "dcf": f"/discounted-cash-flow/{ticker}{suffix}",
-        "price": f"/historical-price-full/{ticker}?serietype=line&timeseries=365{suffix}"
+        "price": f"/historical-price-full/{ticker}?serietype=line&timeseries=365{suffix}",
+        "profile": f"/profile/{ticker}{suffix}"
     }
 
     data = {}
@@ -56,22 +57,24 @@ def get_yahoo_data(ticker):
     except:
         return pd.DataFrame()
 
+# CAGR Calculation
+def calculate_cagr(start_value, end_value, periods):
+    try:
+        return ((end_value / start_value) ** (1 / periods)) - 1
+    except:
+        return None
+
 # Fetch Button
 if st.button("📥 Fetch Financials"):
     with st.spinner("Loading data from FMP..."):
         data = get_fmp_financials(ticker)
+        benchmark_data = get_fmp_financials(benchmark_ticker) if benchmark_ticker else None
 
-        # Company Overview
-        st.subheader("🏢 Company Overview")
-        profile = data.get("profile", [])
-        if profile and isinstance(profile, list):
-            company = profile[0]
-            st.markdown(f"### {ticker} ({company.get('companyName', 'N/A')})")
-            st.markdown(f"**Industry:** {company.get('industry', 'N/A')}  ")
-            st.markdown(f"**Sector:** {company.get('sector', 'N/A')}  ")
-            st.markdown(f"**Founded:** {company.get('ipoDate', 'N/A')}  ")
-        else:
-            st.warning("Company profile not available.")
+        st.subheader(f"📌 Company Overview")
+        if data['profile']:
+            profile = data['profile'][0]
+            st.markdown(f"**{profile.get('companyName', '')}**  ")
+            st.markdown(f"Industry: {profile.get('industry', '-')}, Sector: {profile.get('sector', '-')}, IPO Year: {profile.get('ipoDate', '-')}")
 
         # Display Key Ratios
         st.subheader("📌 Key Ratios")
@@ -116,17 +119,18 @@ if st.button("📥 Fetch Financials"):
             else:
                 st.warning(f"{name} not available from FMP.")
 
-        # Bar Chart - Total Revenue
-        st.subheader("📊 Revenue Trend")
-        if data['income']:
-            df_rev = pd.DataFrame(data['income'])
-            if 'revenue' in df_rev.columns:
-                df_rev = df_rev[['date', 'revenue']].dropna()
-                df_rev['revenue'] = pd.to_numeric(df_rev['revenue'])
-                fig = px.bar(df_rev.sort_values(by='date'), x='date', y='revenue', title="Revenue Over Time")
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.warning("Revenue data not available.")
+        # ROI and EPS Sector Comparison
+        st.subheader("📊 Sector Comparison: ROI & EPS")
+        if benchmark_data and benchmark_data['ratios']:
+            ticker_ratios = data['ratios'][0]
+            bench_ratios = benchmark_data['ratios'][0]
+            comp_df = pd.DataFrame({
+                "Metric": ["ROI", "EPS"],
+                ticker: [ticker_ratios.get("returnOnInvestmentTTM", 0), ticker_ratios.get("epsTTM", 0)],
+                benchmark_ticker: [bench_ratios.get("returnOnInvestmentTTM", 0), bench_ratios.get("epsTTM", 0)]
+            })
+            comp_fig = px.bar(comp_df, x="Metric", y=[ticker, benchmark_ticker], barmode='group', title="ROI and EPS Comparison")
+            st.plotly_chart(comp_fig, use_container_width=True)
 
         # Historical Stock Price Line Chart
         st.subheader("📉 Historical Stock Price")
@@ -135,14 +139,15 @@ if st.button("📥 Fetch Financials"):
             df_price['date'] = pd.to_datetime(df_price['date'])
             fig_line = px.line(df_price, x='date', y='close', title=f"{ticker} Stock Price")
             st.plotly_chart(fig_line, use_container_width=True)
-        else:
-            st.warning("FMP stock price data not available. Trying Yahoo Finance...")
-            yahoo_df = get_yahoo_data(ticker)
-            if not yahoo_df.empty:
-                fig_yahoo = px.line(yahoo_df, x='Date', y='Close', title=f"{ticker} Stock Price (Yahoo Finance)")
-                st.plotly_chart(fig_yahoo, use_container_width=True)
-            else:
-                st.error("Could not fetch stock data from Yahoo Finance either.")
+
+            # CAGR
+            if len(df_price) >= 2:
+                start_price = df_price.iloc[-1]['close']
+                end_price = df_price.iloc[0]['close']
+                years = (df_price.iloc[0]['date'] - df_price.iloc[-1]['date']).days / 365
+                cagr = calculate_cagr(start_price, end_price, years)
+                if cagr is not None:
+                    st.metric("CAGR (Price)", f"{cagr*100:.2f}%")
 
         # Excel Export of Full Financials
         st.subheader("📤 Export to Excel")
@@ -153,3 +158,7 @@ if st.button("📥 Fetch Financials"):
                 pd.DataFrame(data['cashflow']).to_excel(writer, sheet_name="Cash Flow", index=False)
                 pd.DataFrame([ratios[0]] if isinstance(ratios, list) and ratios else [{}]).to_excel(writer, sheet_name="Ratios", index=False)
             st.download_button("💾 Download Full Financials", buffer.getvalue(), file_name=f"{ticker}_financials.xlsx")
+
+        # Image Export
+        st.subheader("📸 Export Visuals")
+        st.markdown("Use the Plotly chart menu (top-right corner of each chart) to download charts as PNG or PDF.")
