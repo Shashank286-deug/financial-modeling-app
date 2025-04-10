@@ -21,10 +21,6 @@ st.title("📊 Financial Model & Valuation Dashboard")
 # Sidebar
 ticker = st.sidebar.text_input("Enter Ticker (e.g., AAPL, MSFT)", value="AAPL")
 
-# Dashboard mode toggle
-dashboard_mode = st.sidebar.radio("Dashboard Mode", ["📊 Summary View", "🔍 Deep Dive View"])
-show_summary = dashboard_mode == "📊 Summary View"
-
 # Function to fetch financial data from FMP
 @st.cache_data(ttl=3600)
 def get_fmp_financials(ticker):
@@ -37,7 +33,8 @@ def get_fmp_financials(ticker):
         "cashflow": f"/cash-flow-statement/{ticker}?limit=5{suffix}",
         "ratios": f"/ratios-ttm/{ticker}{suffix}",
         "dcf": f"/discounted-cash-flow/{ticker}{suffix}",
-        "price": f"/historical-price-full/{ticker}?serietype=line&timeseries=365{suffix}"
+        "price": f"/historical-price-full/{ticker}?serietype=line&timeseries=365{suffix}",
+        "profile": f"/profile/{ticker}{suffix}"
     }
 
     data = {}
@@ -64,99 +61,92 @@ if st.button("📥 Fetch Financials"):
     with st.spinner("Loading data from FMP..."):
         data = get_fmp_financials(ticker)
 
-        company_name = f"{ticker.upper()}"
-        if 'profile' in data and data['profile']:
-            company_name += f" ({data['profile'][0].get('companyName', '')})"
+        # Summary View
+        if data['profile']:
+            profile = data['profile'][0]
+            full_name = profile.get("companyName", "N/A")
+            industry = profile.get("industry", "N/A")
+            founded = profile.get("ipoDate", "N/A")[:4] if profile.get("ipoDate") else "N/A"
+            st.markdown(f"### 🏢 {ticker.upper()} ({full_name})")
+            st.markdown(f"**Industry:** {industry} | **Founded:** {founded}")
 
-        st.subheader(f"🏷️ {company_name}")
-
-        if show_summary:
-            st.subheader("📌 Key Ratios")
-            ratios = data['ratios']
-            if isinstance(ratios, list) and len(ratios) > 0:
-                ratio_data = ratios[0]
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    color = "green" if ratio_data.get("peRatioTTM", 0) < 25 else "red"
-                    st.metric("P/E Ratio", f"{ratio_data.get('peRatioTTM', float('nan')):.2f}", delta="Ideal < 25", delta_color=color)
-                with col2:
-                    roe = ratio_data.get("returnOnEquityTTM", float('nan'))
-                    st.metric("ROE", f"{roe:.2f}%")
-                with col3:
-                    roa = ratio_data.get("returnOnAssetsTTM", float('nan'))
-                    st.metric("ROA", f"{roa:.2f}%")
+        # Display Key Ratios
+        st.subheader("📌 Key Ratios")
+        ratios = data['ratios']
+        if isinstance(ratios, list) and len(ratios) > 0:
+            ratio_data = ratios[0]
+            formatted_ratios = {
+                "P/E Ratio": ratio_data.get("peRatioTTM", float('nan')),
+                "ROE": ratio_data.get("returnOnEquityTTM", float('nan')),
+                "ROA": ratio_data.get("returnOnAssetsTTM", float('nan')),
+                "Debt/Equity": ratio_data.get("debtEquityRatioTTM", float('nan')),
+                "EPS": ratio_data.get("epsTTM", float('nan'))
+            }
+            ratios_df = pd.DataFrame([formatted_ratios])
+            st.dataframe(ratios_df.style.format({col: "{:.2f}" for col in ratios_df.columns}), use_container_width=True)
         else:
-            with st.expander("📌 Key Ratios", expanded=True):
-                ratios = data['ratios']
-                if isinstance(ratios, list) and len(ratios) > 0:
-                    ratio_data = ratios[0]
-                    formatted_ratios = {
-                        "P/E Ratio": ratio_data.get("peRatioTTM", float('nan')),
-                        "ROE": ratio_data.get("returnOnEquityTTM", float('nan')),
-                        "ROA": ratio_data.get("returnOnAssetsTTM", float('nan')),
-                        "Debt/Equity": ratio_data.get("debtEquityRatioTTM", float('nan')),
-                        "EPS": ratio_data.get("epsTTM", float('nan'))
-                    }
-                    ratios_df = pd.DataFrame([formatted_ratios])
-                    st.dataframe(ratios_df.style.format({col: "{:.2f}" for col in ratios_df.columns}), use_container_width=True)
-                else:
-                    st.warning("Ratio data not available or in unexpected format.")
+            st.warning("Ratio data not available or in unexpected format.")
 
-            with st.expander("📈 DCF Valuation"):
-                if data['dcf']:
-                    try:
-                        dcf_value = float(data['dcf'][0]['dcf'])
-                        price = float(data['dcf'][0]['Stock Price'])
-                        st.metric("DCF Value", f"${dcf_value:.2f}", delta=f"Market Price: ${price:.2f}")
-                    except:
-                        st.warning("DCF data parsing error")
+        # DCF Valuation
+        st.subheader("📈 DCF Valuation")
+        if data['dcf']:
+            try:
+                dcf_value = float(data['dcf'][0]['dcf'])
+                price = float(data['dcf'][0]['Stock Price'])
+                st.metric("DCF Value", f"${dcf_value:.2f}", delta=f"Market Price: ${price:.2f}")
+            except:
+                st.warning("DCF data parsing error")
 
-            with st.expander("🗂 Multi-Year Financials"):
-                for name, d in [
-                    ("Income Statement", data['income']),
-                    ("Balance Sheet", data['balance']),
-                    ("Cash Flow", data['cashflow'])
-                ]:
-                    if isinstance(d, list) and d:
-                        df = pd.DataFrame(d)
-                        if 'date' in df.columns:
-                            df.set_index("date", inplace=True)
-                        st.markdown(f"### {name}")
-                        st.dataframe(df.style.format(na_rep="-"), use_container_width=True)
-                    else:
-                        st.warning(f"{name} not available from FMP.")
+        # Multi-year Comparisons
+        st.subheader("🗂 Multi-Year Financials")
+        for name, d in [
+            ("Income Statement", data['income']),
+            ("Balance Sheet", data['balance']),
+            ("Cash Flow", data['cashflow'])
+        ]:
+            if isinstance(d, list) and d:
+                df = pd.DataFrame(d)
+                if 'date' in df.columns:
+                    df.set_index("date", inplace=True)
+                st.markdown(f"### {name}")
+                st.dataframe(df.style.format(na_rep="-"), use_container_width=True)
+            else:
+                st.warning(f"{name} not available from FMP.")
 
-            with st.expander("📊 Revenue Trend"):
-                if data['income']:
-                    df_rev = pd.DataFrame(data['income'])
-                    if 'revenue' in df_rev.columns:
-                        df_rev = df_rev[['date', 'revenue']].dropna()
-                        df_rev['revenue'] = pd.to_numeric(df_rev['revenue'])
-                        fig = px.bar(df_rev.sort_values(by='date'), x='date', y='revenue', title="Revenue Over Time")
-                        st.plotly_chart(fig, use_container_width=True)
-                    else:
-                        st.warning("Revenue data not available.")
+        # Bar Chart - Total Revenue
+        st.subheader("📊 Revenue Trend")
+        if data['income']:
+            df_rev = pd.DataFrame(data['income'])
+            if 'revenue' in df_rev.columns:
+                df_rev = df_rev[['date', 'revenue']].dropna()
+                df_rev['revenue'] = pd.to_numeric(df_rev['revenue'])
+                fig = px.bar(df_rev.sort_values(by='date'), x='date', y='revenue', title="Revenue Over Time")
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.warning("Revenue data not available.")
 
-            with st.expander("📉 Historical Stock Price"):
-                if data['price'] and 'historical' in data['price']:
-                    df_price = pd.DataFrame(data['price']['historical'])
-                    df_price['date'] = pd.to_datetime(df_price['date'])
-                    fig_line = px.line(df_price, x='date', y='close', title=f"{ticker} Stock Price")
-                    st.plotly_chart(fig_line, use_container_width=True)
-                else:
-                    st.warning("FMP stock price data not available. Trying Yahoo Finance...")
-                    yahoo_df = get_yahoo_data(ticker)
-                    if not yahoo_df.empty:
-                        fig_yahoo = px.line(yahoo_df, x='Date', y='Close', title=f"{ticker} Stock Price (Yahoo Finance)")
-                        st.plotly_chart(fig_yahoo, use_container_width=True)
-                    else:
-                        st.error("Could not fetch stock data from Yahoo Finance either.")
+        # Historical Stock Price Line Chart
+        st.subheader("📉 Historical Stock Price")
+        if data['price'] and 'historical' in data['price']:
+            df_price = pd.DataFrame(data['price']['historical'])
+            df_price['date'] = pd.to_datetime(df_price['date'])
+            fig_line = px.line(df_price, x='date', y='close', title=f"{ticker} Stock Price")
+            st.plotly_chart(fig_line, use_container_width=True)
+        else:
+            st.warning("FMP stock price data not available. Trying Yahoo Finance...")
+            yahoo_df = get_yahoo_data(ticker)
+            if not yahoo_df.empty:
+                fig_yahoo = px.line(yahoo_df, x='Date', y='Close', title=f"{ticker} Stock Price (Yahoo Finance)")
+                st.plotly_chart(fig_yahoo, use_container_width=True)
+            else:
+                st.error("Could not fetch stock data from Yahoo Finance either.")
 
-            with st.expander("📤 Export to Excel"):
-                with BytesIO() as buffer:
-                    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                        pd.DataFrame(data['income']).to_excel(writer, sheet_name="Income", index=False)
-                        pd.DataFrame(data['balance']).to_excel(writer, sheet_name="Balance", index=False)
-                        pd.DataFrame(data['cashflow']).to_excel(writer, sheet_name="Cash Flow", index=False)
-                        pd.DataFrame([ratios[0]] if isinstance(ratios, list) and ratios else [{}]).to_excel(writer, sheet_name="Ratios", index=False)
-                    st.download_button("💾 Download Full Financials", buffer.getvalue(), file_name=f"{ticker}_financials.xlsx")
+        # Excel Export of Full Financials
+        st.subheader("📤 Export to Excel")
+        with BytesIO() as buffer:
+            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                pd.DataFrame(data['income']).to_excel(writer, sheet_name="Income", index=False)
+                pd.DataFrame(data['balance']).to_excel(writer, sheet_name="Balance", index=False)
+                pd.DataFrame(data['cashflow']).to_excel(writer, sheet_name="Cash Flow", index=False)
+                pd.DataFrame([ratios[0]] if isinstance(ratios, list) and ratios else [{}]).to_excel(writer, sheet_name="Ratios", index=False)
+            st.download_button("💾 Download Full Financials", buffer.getvalue(), file_name=f"{ticker}_financials.xlsx")
