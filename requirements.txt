@@ -1,4 +1,9 @@
 streamlit
+yfinance
 requests
 pandas
+seaborn
 matplotlib
+finnhub-python
+plotly
+openpyxl
