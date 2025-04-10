@@ -18,8 +18,7 @@ st.title("📊 Financial Model & Valuation Dashboard")
 
 # Sidebar
 st.sidebar.header("Settings")
-ticker_list = ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA"]
-ticker = st.sidebar.selectbox("Select Ticker", ticker_list)
+user_ticker_input = st.sidebar.text_input("Enter Ticker Symbol (e.g., AAPL)", value="AAPL").upper()
 
 # Function to fetch financial data from FMP
 @st.cache_data(ttl=3600)
@@ -48,7 +47,7 @@ def get_fmp_financials(ticker):
 # Fetch Button
 if st.button("📥 Fetch Financials"):
     with st.spinner("Loading data from FMP..."):
-        data = get_fmp_financials(ticker)
+        data = get_fmp_financials(user_ticker_input)
 
         # Display Key Ratios
         st.subheader("📌 Key Ratios")
@@ -63,10 +62,7 @@ if st.button("📥 Fetch Financials"):
                 "EPS": ratio_data.get("epsTTM", float('nan'))
             }
             ratios_df = pd.DataFrame([formatted_ratios])
-            if ratios_df.empty:
-                st.warning("No valid ratios available.")
-            else:
-                st.dataframe(ratios_df.style.format({col: "{:.2f}" for col in ratios_df.columns}), use_container_width=True)
+            st.dataframe(ratios_df.style.format({col: "{:.2f}" for col in ratios_df.columns}), use_container_width=True)
         else:
             st.warning("Ratio data not available or in unexpected format.")
 
@@ -75,7 +71,7 @@ if st.button("📥 Fetch Financials"):
         if data['dcf']:
             try:
                 dcf_value = float(data['dcf'][0]['dcf'])
-                price = float(data['dcf'][0].get('Stock price', 0))
+                price = float(data['dcf'][0]['Stock Price'])
                 st.metric("DCF Value", f"${dcf_value:.2f}", delta=f"Market Price: ${price:.2f}")
             except:
                 st.warning("DCF data parsing error")
@@ -93,26 +89,26 @@ if st.button("📥 Fetch Financials"):
                 st.markdown(f"### {name}")
                 st.dataframe(df.style.format(na_rep="-"), use_container_width=True)
 
-        # 📊 Revenue Trend
+        # Bar Chart - Total Revenue
         st.subheader("📊 Revenue Trend")
         if data['income']:
             df_rev = pd.DataFrame(data['income'])
             rev_col = 'revenue' if 'revenue' in df_rev.columns else 'totalRevenue'
-            df_rev = df_rev[['date', rev_col]].dropna()
-            df_rev[rev_col] = pd.to_numeric(df_rev[rev_col], errors='coerce')
-            df_rev = df_rev.sort_values(by='date')
-            fig = px.bar(df_rev, x='date', y=rev_col, title="Revenue Over Time")
-            st.plotly_chart(fig, use_container_width=True)
+            if rev_col in df_rev.columns:
+                df_rev = df_rev[['date', rev_col]].dropna()
+                df_rev[rev_col] = pd.to_numeric(df_rev[rev_col])
+                fig = px.bar(df_rev.sort_values(by='date'), x='date', y=rev_col, title="Revenue Over Time")
+                st.plotly_chart(fig, use_container_width=True)
 
-        # 📉 Historical Stock Price
+        # Historical Stock Price Line Chart
         st.subheader("📉 Historical Stock Price")
         if data['price'] and 'historical' in data['price']:
             df_price = pd.DataFrame(data['price']['historical'])
             df_price['date'] = pd.to_datetime(df_price['date'])
-            fig_line = px.line(df_price, x='date', y='close', title=f"{ticker} Stock Price")
+            fig_line = px.line(df_price, x='date', y='close', title=f"{user_ticker_input} Stock Price")
             st.plotly_chart(fig_line, use_container_width=True)
 
-        # 📤 Export to Excel
+        # Excel Export of Full Financials
         st.subheader("📤 Export to Excel")
         with BytesIO() as buffer:
             with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
@@ -120,4 +116,4 @@ if st.button("📥 Fetch Financials"):
                 pd.DataFrame(data['balance']).to_excel(writer, sheet_name="Balance", index=False)
                 pd.DataFrame(data['cashflow']).to_excel(writer, sheet_name="Cash Flow", index=False)
                 pd.DataFrame([ratios[0]] if isinstance(ratios, list) and ratios else [{}]).to_excel(writer, sheet_name="Ratios", index=False)
-            st.download_button("💾 Download Full Financials", buffer.getvalue(), file_name=f"{ticker}_financials.xlsx")
+            st.download_button("💾 Download Full Financials", buffer.getvalue(), file_name=f"{user_ticker_input}_financials.xlsx")
