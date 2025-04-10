@@ -55,13 +55,14 @@ if st.button("📥 Fetch Financials"):
         ratios = data['ratios']
         if isinstance(ratios, list) and len(ratios) > 0:
             ratio_data = ratios[0]  # First element of the list is the actual dictionary
-            ratios_df = pd.DataFrame([{
-                "P/E Ratio": ratio_data.get("peRatioTTM"),
-                "ROE": ratio_data.get("returnOnEquityTTM"),
-                "ROA": ratio_data.get("returnOnAssetsTTM"),
-                "Debt/Equity": ratio_data.get("debtEquityRatioTTM"),
-                "EPS": ratio_data.get("epsTTM")
-            }])
+            formatted_ratios = {
+                "P/E Ratio": ratio_data.get("peRatioTTM", float('nan')),
+                "ROE": ratio_data.get("returnOnEquityTTM", float('nan')),
+                "ROA": ratio_data.get("returnOnAssetsTTM", float('nan')),
+                "Debt/Equity": ratio_data.get("debtEquityRatioTTM", float('nan')),
+                "EPS": ratio_data.get("epsTTM", float('nan'))
+            }
+            ratios_df = pd.DataFrame([formatted_ratios])
             st.dataframe(ratios_df.style.format("{:.2f}"), use_container_width=True)
         else:
             st.warning("Ratio data not available or in unexpected format.")
