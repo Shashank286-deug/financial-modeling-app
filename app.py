@@ -21,6 +21,9 @@ st.title("📊 Financial Model & Valuation Dashboard")
 # Sidebar
 ticker = st.sidebar.text_input("Enter Ticker (e.g., AAPL, MSFT)", value="AAPL")
 
+# Sector Metric Choice
+sector_metric = st.sidebar.selectbox("Sector Comparison Metric", ["revenue", "returnOnEquityTTM", "epsTTM"], index=0, format_func=lambda x: {"revenue": "Revenue", "returnOnEquityTTM": "ROE", "epsTTM": "EPS"}[x])
+
 # Function to fetch financial data from FMP
 @st.cache_data(ttl=3600)
 def get_fmp_financials(ticker):
@@ -33,8 +36,8 @@ def get_fmp_financials(ticker):
         "cashflow": f"/cash-flow-statement/{ticker}?limit=5{suffix}",
         "ratios": f"/ratios-ttm/{ticker}{suffix}",
         "dcf": f"/discounted-cash-flow/{ticker}{suffix}",
-        "price": f"/historical-price-full/{ticker}?serietype=line&timeseries=365{suffix}",
-        "profile": f"/profile/{ticker}{suffix}"
+        "profile": f"/profile/{ticker}{suffix}",
+        "price": f"/historical-price-full/{ticker}?serietype=line&timeseries=365{suffix}"
     }
 
     data = {}
@@ -45,6 +48,26 @@ def get_fmp_financials(ticker):
         else:
             data[key] = []
     return data
+
+# Function to fetch sector peers and ratios
+@st.cache_data(ttl=3600)
+def get_sector_comparison(sector, metric):
+    url = f"https://financialmodelingprep.com/api/v3/stock-screener?sector={sector}&limit=10&apikey={FMP_API_KEY}"
+    r = requests.get(url)
+    if r.status_code != 200:
+        return pd.DataFrame()
+    companies = r.json()
+    result = []
+    for company in companies:
+        ticker = company['symbol']
+        name = company['companyName']
+        ratio_url = f"https://financialmodelingprep.com/api/v3/ratios-ttm/{ticker}?apikey={FMP_API_KEY}"
+        res = requests.get(ratio_url)
+        if res.status_code == 200 and res.json():
+            val = res.json()[0].get(metric, None)
+            if val is not None:
+                result.append({"Company": name, "Value": val})
+    return pd.DataFrame(result)
 
 # Fallback using yfinance
 @st.cache_data(ttl=3600)
@@ -60,23 +83,6 @@ def get_yahoo_data(ticker):
 if st.button("📥 Fetch Financials"):
     with st.spinner("Loading data from FMP..."):
         data = get_fmp_financials(ticker)
-
-        # Basic Company Info Panel
-        if data['profile']:
-            profile = data['profile'][0]
-            with st.expander("🏢 Company Overview"):
-                st.markdown(f"**{profile.get('companyName', 'N/A')}** ({profile.get('symbol', '')})")
-                st.markdown(f"**Industry**: {profile.get('industry', 'N/A')}")
-                st.markdown(f"**IPO Date**: {profile.get('ipoDate', 'N/A')}")
-                st.markdown(f"**Sector**: {profile.get('sector', 'N/A')}")
-
-            # Quick Stats Side Card
-            with st.sidebar:
-                st.markdown("### 🔍 Quick Stats")
-                st.metric("Market Cap", f"{profile.get('mktCap', 'N/A'):,}")
-                st.metric("Beta", f"{profile.get('beta', 'N/A')}")
-                st.metric("52W Range", f"{profile.get('range', 'N/A')}")
-                st.metric("Exchange", f"{profile.get('exchange', 'N/A')}")
 
         # Display Key Ratios
         st.subheader("📌 Key Ratios")
@@ -148,6 +154,20 @@ if st.button("📥 Fetch Financials"):
                 st.plotly_chart(fig_yahoo, use_container_width=True)
             else:
                 st.error("Could not fetch stock data from Yahoo Finance either.")
+
+        # Sector Comparison
+        if data.get('profile') and isinstance(data['profile'], list):
+            company_sector = data['profile'][0].get('sector')
+            if company_sector:
+                st.subheader("🏢 Sector Comparison")
+                sector_df = get_sector_comparison(company_sector, sector_metric)
+                if not sector_df.empty:
+                    fig_sector = px.bar(sector_df.sort_values("Value", ascending=False), x="Company", y="Value",
+                                        title=f"Sector Comparison - {sector_metric.upper()}", color="Value",
+                                        color_continuous_scale="Viridis")
+                    st.plotly_chart(fig_sector, use_container_width=True)
+                else:
+                    st.warning("Unable to fetch sector comparison data.")
 
         # Excel Export of Full Financials
         st.subheader("📤 Export to Excel")
