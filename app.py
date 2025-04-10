@@ -23,20 +23,18 @@ st.sidebar.header("Watchlist")
 if "watchlist" not in st.session_state:
     st.session_state.watchlist = []
 
-add_ticker = st.sidebar.text_input("Add Ticker to Watchlist")
-if st.sidebar.button("➕ Add"):
-    if add_ticker and add_ticker.upper() not in st.session_state.watchlist:
+add_ticker = st.sidebar.text_input("Add Ticker (e.g., AAPL, MSFT)")
+if st.sidebar.button("➕ Add to Watchlist") and add_ticker:
+    if add_ticker not in st.session_state.watchlist:
         st.session_state.watchlist.append(add_ticker.upper())
 
-remove_ticker = st.sidebar.selectbox("Remove Ticker", options=st.session_state.watchlist if st.session_state.watchlist else ["None"])
-if st.sidebar.button("➖ Remove") and remove_ticker != "None":
-    st.session_state.watchlist.remove(remove_ticker)
-
-st.sidebar.subheader("Your Watchlist")
-st.sidebar.write(st.session_state.watchlist)
-
-# Default ticker selection
-ticker = st.sidebar.selectbox("Select a Ticker", options=st.session_state.watchlist if st.session_state.watchlist else ["AAPL"])
+if st.session_state.watchlist:
+    selected_ticker = st.sidebar.selectbox("Select Ticker", st.session_state.watchlist)
+    remove_ticker = st.sidebar.selectbox("Remove Ticker", ["None"] + st.session_state.watchlist)
+    if remove_ticker != "None" and st.sidebar.button("❌ Remove from Watchlist"):
+        st.session_state.watchlist.remove(remove_ticker)
+else:
+    selected_ticker = None
 
 # Function to fetch financial data from FMP
 @st.cache_data(ttl=3600)
@@ -50,7 +48,8 @@ def get_fmp_financials(ticker):
         "cashflow": f"/cash-flow-statement/{ticker}?limit=5{suffix}",
         "ratios": f"/ratios-ttm/{ticker}{suffix}",
         "dcf": f"/discounted-cash-flow/{ticker}{suffix}",
-        "price": f"/historical-price-full/{ticker}?serietype=line&timeseries=365{suffix}"
+        "price": f"/historical-price-full/{ticker}?serietype=line&timeseries=365{suffix}",
+        "profile": f"/profile/{ticker}{suffix}"
     }
 
     data = {}
@@ -73,9 +72,17 @@ def get_yahoo_data(ticker):
         return pd.DataFrame()
 
 # Fetch Button
-if st.button("📥 Fetch Financials"):
+if selected_ticker and st.button("📥 Fetch Financials"):
     with st.spinner("Loading data from FMP..."):
-        data = get_fmp_financials(ticker)
+        data = get_fmp_financials(selected_ticker)
+
+        # Display Company Name
+        if data['profile']:
+            try:
+                company_name = data['profile'][0].get("companyName", "")
+                st.markdown(f"## {selected_ticker} ({company_name})")
+            except:
+                pass
 
         # Display Key Ratios
         st.subheader("📌 Key Ratios")
@@ -137,13 +144,13 @@ if st.button("📥 Fetch Financials"):
         if data['price'] and 'historical' in data['price']:
             df_price = pd.DataFrame(data['price']['historical'])
             df_price['date'] = pd.to_datetime(df_price['date'])
-            fig_line = px.line(df_price, x='date', y='close', title=f"{ticker} Stock Price")
+            fig_line = px.line(df_price, x='date', y='close', title=f"{selected_ticker} Stock Price")
             st.plotly_chart(fig_line, use_container_width=True)
         else:
             st.warning("FMP stock price data not available. Trying Yahoo Finance...")
-            yahoo_df = get_yahoo_data(ticker)
+            yahoo_df = get_yahoo_data(selected_ticker)
             if not yahoo_df.empty:
-                fig_yahoo = px.line(yahoo_df, x='Date', y='Close', title=f"{ticker} Stock Price (Yahoo Finance)")
+                fig_yahoo = px.line(yahoo_df, x='Date', y='Close', title=f"{selected_ticker} Stock Price (Yahoo Finance)")
                 st.plotly_chart(fig_yahoo, use_container_width=True)
             else:
                 st.error("Could not fetch stock data from Yahoo Finance either.")
@@ -156,4 +163,4 @@ if st.button("📥 Fetch Financials"):
                 pd.DataFrame(data['balance']).to_excel(writer, sheet_name="Balance", index=False)
                 pd.DataFrame(data['cashflow']).to_excel(writer, sheet_name="Cash Flow", index=False)
                 pd.DataFrame([ratios[0]] if isinstance(ratios, list) and ratios else [{}]).to_excel(writer, sheet_name="Ratios", index=False)
-            st.download_button("💾 Download Full Financials", buffer.getvalue(), file_name=f"{ticker}_financials.xlsx")
+            st.download_button("💾 Download Full Financials", buffer.getvalue(), file_name=f"{selected_ticker}_financials.xlsx")
