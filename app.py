@@ -10,7 +10,7 @@ import smtplib
 from email.message import EmailMessage
 from io import BytesIO
 from datetime import datetime
-import openpyxl
+
 from openpyxl.chart import BarChart, Reference
 import time
 
