@@ -11,152 +11,80 @@ import openpyxl
 from openpyxl.chart import BarChart, Reference
 import yfinance as yf
 from tradingview_ta import TA_Handler, Interval, Exchange
+import base64
 
-# Load API keys securely from Streamlit secrets
+# Load API keys
 FMP_API_KEY = st.secrets["FMP_API_KEY"]
-FINNHUB_API_KEY = st.secrets.get("FINNHUB_API_KEY", "cvruj4hr01qnpem9ptd0cvruj4hr01qnpem9ptdg")
-ALPHAV_API_KEY = st.secrets.get("ALPHAV_API_KEY", "RJFBECXE6JM1JGFN")
+FINNHUB_API_KEY = st.secrets.get("FINNHUB_API_KEY", "")
+ALPHA_VANTAGE_API_KEY = st.secrets.get("ALPHA_VANTAGE_API_KEY", "")
 
 st.set_page_config(page_title="Financial Dashboard", layout="wide")
 st.title("📊 Financial Model & Valuation Dashboard")
 
 # Sidebar
+st.sidebar.header("Search & Benchmark")
 ticker = st.sidebar.text_input("Enter Ticker (e.g., AAPL, MSFT)", value="AAPL")
+benchmark_tickers = st.sidebar.text_input("Benchmark Tickers (comma-separated)", value="GOOGL,AMZN").split(',')
 
-# Function to fetch financial data from FMP
+# Function to calculate CAGR
+def calculate_cagr(start_value, end_value, years):
+    if start_value <= 0 or years <= 0:
+        return float('nan')
+    return (end_value / start_value) ** (1 / years) - 1
+
+# Function to export Plotly figure to downloadable image
 @st.cache_data(ttl=3600)
-def get_fmp_financials(ticker):
-    base_url = "https://financialmodelingprep.com/api/v3"
-    suffix = f"?apikey={FMP_API_KEY}"
+def get_image_download_link(fig):
+    buffer = BytesIO()
+    fig.write_image(buffer, format='png')
+    buffer.seek(0)
+    b64 = base64.b64encode(buffer.read()).decode()
+    href = f'<a href="data:image/png;base64,{b64}" download="plot.png">📷 Download Chart as PNG</a>'
+    return href
 
-    endpoints = {
-        "income": f"/income-statement/{ticker}?limit=5{suffix}",
-        "balance": f"/balance-sheet-statement/{ticker}?limit=5{suffix}",
-        "cashflow": f"/cash-flow-statement/{ticker}?limit=5{suffix}",
-        "ratios": f"/ratios-ttm/{ticker}{suffix}",
-        "dcf": f"/discounted-cash-flow/{ticker}{suffix}",
-        "price": f"/historical-price-full/{ticker}?serietype=line&timeseries=365{suffix}"
-    }
-
-    data = {}
-    for key, endpoint in endpoints.items():
-        r = requests.get(base_url + endpoint)
-        if r.status_code == 200:
-            data[key] = r.json()
-        else:
-            data[key] = []
-    return data
-
-# Fallback using yfinance
-@st.cache_data(ttl=3600)
-def get_yahoo_data(ticker):
-    try:
-        stock = yf.Ticker(ticker)
-        hist = stock.history(period="1y")
-        return hist.reset_index()
-    except:
-        return pd.DataFrame()
-
-# Additional data source from Alpha Vantage
-@st.cache_data(ttl=3600)
-def get_alpha_vantage_data(ticker):
-    url = f"https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol={ticker}&apikey={ALPHAV_API_KEY}"
-    r = requests.get(url)
-    if r.status_code == 200:
-        return r.json()
-    return {}
-
-# Additional data source from Finnhub
-@st.cache_data(ttl=3600)
-def get_finnhub_profile(ticker):
-    url = f"https://finnhub.io/api/v1/stock/profile2?symbol={ticker}&token={FINNHUB_API_KEY}"
-    r = requests.get(url)
-    if r.status_code == 200:
-        return r.json()
-    return {}
-
-# Fetch Button
+# Enhanced EPS & Benchmarking Table
 if st.button("📥 Fetch Financials"):
-    with st.spinner("Loading data from FMP..."):
-        data = get_fmp_financials(ticker)
+    tickers = [ticker] + benchmark_tickers
+    all_data = {}
+    eps_df = pd.DataFrame()
 
-        # Display Key Ratios
-        st.subheader("📌 Key Ratios")
-        ratios = data['ratios']
-        if isinstance(ratios, list) and len(ratios) > 0:
-            ratio_data = ratios[0]
-            formatted_ratios = {
-                "P/E Ratio": ratio_data.get("peRatioTTM", float('nan')),
-                "ROE": ratio_data.get("returnOnEquityTTM", float('nan')),
-                "ROA": ratio_data.get("returnOnAssetsTTM", float('nan')),
-                "Debt/Equity": ratio_data.get("debtEquityRatioTTM", float('nan')),
-                "EPS": ratio_data.get("epsTTM", float('nan'))
-            }
-            ratios_df = pd.DataFrame([formatted_ratios])
-            st.dataframe(ratios_df.style.format({col: "{:.2f}" for col in ratios_df.columns}), use_container_width=True)
-        else:
-            st.warning("Ratio data not available or in unexpected format.")
+    for tkr in tickers:
+        try:
+            data = requests.get(f"https://financialmodelingprep.com/api/v3/income-statement/{tkr}?limit=5&apikey={FMP_API_KEY}").json()
+            eps_list = [float(x.get('eps', 0)) for x in data if 'eps' in x]
+            years = len(eps_list)
+            if years >= 2:
+                cagr = calculate_cagr(eps_list[-1], eps_list[0], years-1)
+                eps_df[tkr] = eps_list[::-1]
+                eps_df.loc['CAGR'] = ["{:.2%}".format(cagr)] + ["" for _ in range(years - 1)]
+                all_data[tkr] = data
+        except Exception as e:
+            st.warning(f"Could not load data for {tkr}: {e}")
 
-        # DCF Valuation
-        st.subheader("📈 DCF Valuation")
-        if data['dcf']:
-            try:
-                dcf_value = float(data['dcf'][0]['dcf'])
-                price = float(data['dcf'][0]['Stock Price'])
-                st.metric("DCF Value", f"${dcf_value:.2f}", delta=f"Market Price: ${price:.2f}")
-            except:
-                st.warning("DCF data parsing error")
+    if not eps_df.empty:
+        st.subheader("📈 EPS Growth & CAGR Benchmark")
+        st.dataframe(eps_df.fillna("-"))
 
-        # Multi-year Comparisons
-        st.subheader("🗂 Multi-Year Financials")
-        for name, d in [
-            ("Income Statement", data['income']),
-            ("Balance Sheet", data['balance']),
-            ("Cash Flow", data['cashflow'])
-        ]:
-            if isinstance(d, list) and d:
-                df = pd.DataFrame(d)
-                if 'date' in df.columns:
-                    df.set_index("date", inplace=True)
-                st.markdown(f"### {name}")
-                st.dataframe(df.style.format(na_rep="-"), use_container_width=True)
-            else:
-                st.warning(f"{name} not available from FMP.")
+        # EPS Growth Chart
+        eps_chart = px.line(eps_df.drop(index='CAGR', errors='ignore'), title="EPS Growth Trends")
+        st.plotly_chart(eps_chart, use_container_width=True)
+        st.markdown(get_image_download_link(eps_chart), unsafe_allow_html=True)
 
-        # Bar Chart - Total Revenue
-        st.subheader("📊 Revenue Trend")
-        if data['income']:
-            df_rev = pd.DataFrame(data['income'])
-            if 'revenue' in df_rev.columns:
-                df_rev = df_rev[['date', 'revenue']].dropna()
-                df_rev['revenue'] = pd.to_numeric(df_rev['revenue'])
-                fig = px.bar(df_rev.sort_values(by='date'), x='date', y='revenue', title="Revenue Over Time")
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.warning("Revenue data not available.")
+    # Sector Comparison
+    st.subheader("📊 Industry Benchmarking")
+    metrics = ["revenue", "netIncome", "eps"]
+    selected_metric = st.selectbox("Select Metric", metrics)
 
-        # Historical Stock Price Line Chart
-        st.subheader("📉 Historical Stock Price")
-        if data['price'] and 'historical' in data['price']:
-            df_price = pd.DataFrame(data['price']['historical'])
-            df_price['date'] = pd.to_datetime(df_price['date'])
-            fig_line = px.line(df_price, x='date', y='close', title=f"{ticker} Stock Price")
-            st.plotly_chart(fig_line, use_container_width=True)
-        else:
-            st.warning("FMP stock price data not available. Trying Yahoo Finance...")
-            yahoo_df = get_yahoo_data(ticker)
-            if not yahoo_df.empty:
-                fig_yahoo = px.line(yahoo_df, x='Date', y='Close', title=f"{ticker} Stock Price (Yahoo Finance)")
-                st.plotly_chart(fig_yahoo, use_container_width=True)
-            else:
-                st.error("Could not fetch stock data from Yahoo Finance either.")
+    sector_data = []
+    for tkr in tickers:
+        if tkr in all_data and isinstance(all_data[tkr], list) and all_data[tkr]:
+            latest = all_data[tkr][0]
+            sector_data.append({"Ticker": tkr, selected_metric: latest.get(selected_metric, 0)})
 
-        # Excel Export of Full Financials
-        st.subheader("📤 Export to Excel")
-        with BytesIO() as buffer:
-            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                pd.DataFrame(data['income']).to_excel(writer, sheet_name="Income", index=False)
-                pd.DataFrame(data['balance']).to_excel(writer, sheet_name="Balance", index=False)
-                pd.DataFrame(data['cashflow']).to_excel(writer, sheet_name="Cash Flow", index=False)
-                pd.DataFrame([ratios[0]] if isinstance(ratios, list) and ratios else [{}]).to_excel(writer, sheet_name="Ratios", index=False)
-            st.download_button("💾 Download Full Financials", buffer.getvalue(), file_name=f"{ticker}_financials.xlsx")
+    if sector_data:
+        df_sector = pd.DataFrame(sector_data)
+        fig_sector = px.bar(df_sector, x="Ticker", y=selected_metric, title=f"{selected_metric} Comparison")
+        st.plotly_chart(fig_sector, use_container_width=True)
+        st.markdown(get_image_download_link(fig_sector), unsafe_allow_html=True)
+    else:
+        st.info("Benchmark data not available.")
