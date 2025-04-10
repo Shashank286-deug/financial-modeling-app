@@ -36,7 +36,7 @@ ticker = st.sidebar.text_input("Enter Stock Ticker", value="AAPL")
 email_address = st.sidebar.text_input("Enter Email for Alerts (optional)")
 
 # Hardcoded API keys
-ALPHA_VANTAGE_API_KEY = "Q8LU981EWC83K7VI"
+ALPHA_VANTAGE_API_KEY = "D0YT2UOZ2STXX8MT"
 FINNHUB_API_KEY = "cvrbc29r01qp88cpdph0cvrbc29r01qp88cpdphg"
 FMP_API_KEY = "uPJt4YPx3t5TRmcCpS7emobdeRLAngRG"
 
@@ -84,22 +84,22 @@ def get_finnhub_data(ticker):
         return {}
 
 def get_fmp_data(ticker):
-    url = f"https://financialmodelingprep.com/api/v3/key-metrics-ttm/{ticker}?apikey={FMP_API_KEY}"
+    url = f"https://financialmodelingprep.com/api/v3/profile/{ticker}?apikey={FMP_API_KEY}"
     r = requests.get(url)
     if r.status_code != 200:
         return {}
-    try:
-        info = r.json()[0]
-        data = {
-            "P/E Ratio": info.get("peRatioTTM", "N/A"),
-            "EPS": info.get("epsTTM", "N/A"),
-            "EBITDA": info.get("ebitdaTTM", "N/A"),
-            "Cash Flow": info.get("freeCashFlowTTM", "N/A"),
-            "Revenue": info.get("revenueTTM", "N/A")
-        }
-        return data
-    except:
+    info = r.json()
+    if not info:
         return {}
+    profile = info[0]
+    data = {
+        "P/E Ratio": profile.get("pe", "N/A"),
+        "EPS": profile.get("eps", "N/A"),
+        "EBITDA": profile.get("ebitda", "N/A"),
+        "Cash Flow": profile.get("freeCashFlow", "N/A"),
+        "Revenue": profile.get("revenue", "N/A")
+    }
+    return data
 
 def send_email_alert(receiver, subject, body):
     try:
@@ -109,6 +109,7 @@ def send_email_alert(receiver, subject, body):
         msg['To'] = receiver
         msg.set_content(body)
 
+        # Placeholder SMTP - adjust to real credentials and SMTP service
         with smtplib.SMTP("smtp.gmail.com", 587) as server:
             server.starttls()
             # server.login("you@example.com", "password")
@@ -165,12 +166,15 @@ if st.button("📅 Fetch Data"):
             with tab1:
                 st.subheader("📈 Key Metrics")
                 df = pd.DataFrame(metrics.items(), columns=["Metric", "Value"])
+                df["Value"] = pd.to_numeric(df["Value"], errors="coerce")
                 styled_df = df.style.format({"Value": "{:.2f}"}).highlight_null(null_color='red').set_properties(**{'background-color': '#f4f4f4', 'border': '1px solid #ddd'})
                 st.dataframe(styled_df, use_container_width=True)
 
+                # Excel Export
                 excel_data = save_to_excel_with_chart(df, ticker)
                 st.download_button("📤 Download as Excel", excel_data, file_name=f"{ticker}_metrics.xlsx")
 
+                # Save history
                 history_df = pd.DataFrame([[datetime.now().isoformat(), ticker, data_source]],
                                           columns=["Timestamp", "Ticker", "Source"])
                 try:
@@ -178,6 +182,7 @@ if st.button("📅 Fetch Data"):
                 except:
                     pass
 
+                # Email alert
                 if email_address:
                     success = send_email_alert(email_address, f"Metrics for {ticker}", df.to_string(index=False))
                     if success:
