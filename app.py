@@ -1,213 +1,63 @@
 import streamlit as st
-import yfinance as yf
-import requests
 import pandas as pd
-import seaborn as sns
-import matplotlib.pyplot as plt
-import finnhub
-import plotly.express as px
-import smtplib
-from email.message import EmailMessage
-from io import BytesIO
+import requests
+import yfinance as yf
 from datetime import datetime
-import openpyxl
-from openpyxl.chart import BarChart, Reference
 
-# Set layout with dark mode toggle
-st.set_page_config(page_title="Financial Dashboard", layout="wide")
-st.title("📊 Financial Model & Valuation Dashboard")
+# App config
+st.set_page_config(page_title="Financial Modeling App", layout="wide")
 
-# Theme toggle
+# Sidebar Inputs
+st.sidebar.title("Settings")
+data_source = st.sidebar.selectbox("Choose Data Source", ["Yahoo Finance", "FMP"])
+ticker = st.sidebar.text_input("Enter Stock Ticker", "AAPL")
+email = st.sidebar.text_input("Enter Email for Alerts (optional)")
 theme = st.sidebar.radio("Choose Theme", ["Light", "Dark"])
-if theme == "Dark":
-    st.markdown("""
-        <style>
-        body {
-            background-color: #111;
-            color: white;
-        }
-        </style>
-    """, unsafe_allow_html=True)
 
-# Sidebar Settings
-st.sidebar.header("Settings")
-data_source = st.sidebar.selectbox("Choose Data Source", ["Yahoo Finance", "Alpha Vantage", "Finnhub", "FMP"])
-ticker = st.sidebar.text_input("Enter Stock Ticker", value="AAPL")
-email_address = st.sidebar.text_input("Enter Email for Alerts (optional)")
+st.markdown(f"<style>body {{ background-color: {'#0e1117' if theme == 'Dark' else '#FFFFFF'}; }}</style>", unsafe_allow_html=True)
 
-# Hardcoded API keys
-ALPHA_VANTAGE_API_KEY = "D0YT2UOZ2STXX8MT"
-FINNHUB_API_KEY = "cvrbc29r01qp88cpdph0cvrbc29r01qp88cpdphg"
-FMP_API_KEY = "uPJt4YPx3t5TRmcCpS7emobdeRLAngRG"
-
-# Functions
-def get_yahoo_data(ticker):
-    stock = yf.Ticker(ticker)
-    info = stock.info
-    data = {
-        "P/E Ratio": info.get("trailingPE", "N/A"),
-        "EPS": info.get("trailingEps", "N/A"),
-        "EBITDA": info.get("ebitda", "N/A"),
-        "Cash Flow": info.get("operatingCashflow", "N/A"),
-        "Revenue": info.get("totalRevenue", "N/A")
-    }
-    return data
-
-def get_alpha_data(ticker):
-    url = f"https://www.alphavantage.co/query?function=OVERVIEW&symbol={ticker}&apikey={ALPHA_VANTAGE_API_KEY}"
-    r = requests.get(url)
-    if r.status_code != 200:
-        return {}
-    info = r.json()
-    data = {
-        "P/E Ratio": info.get("PERatio", "N/A"),
-        "EPS": info.get("EPS", "N/A"),
-        "EBITDA": info.get("EBITDA", "N/A"),
-        "Cash Flow": info.get("OperatingCashflow", "N/A"),
-        "Revenue": info.get("RevenueTTM", "N/A")
-    }
-    return data
-
-def get_finnhub_data(ticker):
-    client = finnhub.Client(api_key=FINNHUB_API_KEY)
-    try:
-        fundamentals = client.company_basic_financials(ticker, 'all')['metric']
-        data = {
-            "P/E Ratio": fundamentals.get("peBasicExclExtraTTM", "N/A"),
-            "EPS": fundamentals.get("epsTTM", "N/A"),
-            "EBITDA": fundamentals.get("ebitda", "N/A"),
-            "Cash Flow": fundamentals.get("freeCashFlowTTM", "N/A"),
-            "Revenue": fundamentals.get("revenueTTM", "N/A")
-        }
-        return data
-    except:
-        return {}
-
-def get_fmp_data(ticker):
-    url = f"https://financialmodelingprep.com/api/v3/profile/{ticker}?apikey={FMP_API_KEY}"
-    r = requests.get(url)
-    if r.status_code != 200:
-        return {}
-    info = r.json()
-    if not info:
-        return {}
-    profile = info[0]
-    data = {
-        "P/E Ratio": profile.get("pe", "N/A"),
-        "EPS": profile.get("eps", "N/A"),
-        "EBITDA": profile.get("ebitda", "N/A"),
-        "Cash Flow": profile.get("freeCashFlow", "N/A"),
-        "Revenue": profile.get("revenue", "N/A")
-    }
-    return data
-
-def send_email_alert(receiver, subject, body):
-    try:
-        msg = EmailMessage()
-        msg['Subject'] = subject
-        msg['From'] = "financial-dashboard@example.com"
-        msg['To'] = receiver
-        msg.set_content(body)
-
-        # Placeholder SMTP - adjust to real credentials and SMTP service
-        with smtplib.SMTP("smtp.gmail.com", 587) as server:
-            server.starttls()
-            # server.login("you@example.com", "password")
-            # server.send_message(msg)
-            pass
-        return True
-    except:
-        return False
-
-def save_to_excel_with_chart(df, ticker):
-    buffer = BytesIO()
-    df.to_excel(buffer, index=False, sheet_name="Metrics")
-    buffer.seek(0)
-
-    wb = openpyxl.load_workbook(buffer)
-    ws = wb["Metrics"]
-
-    chart = BarChart()
-    chart.title = f"{ticker} Metrics"
-    chart.y_axis.title = 'Value'
-    chart.x_axis.title = 'Metric'
-
-    data_ref = Reference(ws, min_col=2, min_row=1, max_row=6)
-    cats_ref = Reference(ws, min_col=1, min_row=2, max_row=6)
-    chart.add_data(data_ref, titles_from_data=True)
-    chart.set_categories(cats_ref)
-
-    ws.add_chart(chart, "D2")
-
-    final_buffer = BytesIO()
-    wb.save(final_buffer)
-    final_buffer.seek(0)
-    return final_buffer
-
-# Fetch Button
-if st.button("📅 Fetch Data"):
-    with st.spinner("Fetching data..."):
-        if data_source == "Yahoo Finance":
-            metrics = get_yahoo_data(ticker)
-        elif data_source == "Alpha Vantage":
-            metrics = get_alpha_data(ticker)
-        elif data_source == "Finnhub":
-            metrics = get_finnhub_data(ticker)
-        elif data_source == "FMP":
-            metrics = get_fmp_data(ticker)
+# Fetch button
+if st.button("🔄 Fetch Data"):
+    if data_source == "Yahoo Finance":
+        stock = yf.Ticker(ticker)
+        info = stock.info
+        if info:
+            df = pd.DataFrame.from_dict(info, orient='index', columns=['Value']).reset_index()
         else:
-            metrics = {}
+            st.error("Failed to fetch data from Yahoo Finance.")
+            df = pd.DataFrame()
 
-        if not metrics:
-            st.error("Data fetch failed. Please check ticker or try a different source.")
+    elif data_source == "FMP":
+        fmp_api_key = "uPJt4YPx3t5TRmcCpS7emobdeRLAngRG"  # You should store this securely in .env or secrets
+        url = f"https://financialmodelingprep.com/api/v3/profile/{ticker}?apikey={fmp_api_key}"
+        response = requests.get(url)
+        if response.status_code == 200:
+            data = response.json()
+            if data:
+                df = pd.DataFrame.from_dict(data[0], orient='index', columns=['Value']).reset_index()
+            else:
+                st.error("No data found for this ticker from FMP.")
+                df = pd.DataFrame()
         else:
-            tab1, tab2 = st.tabs(["📈 Metrics Table", "📊 Visualizations"])
+            st.error("Failed to fetch data from FMP API.")
+            df = pd.DataFrame()
 
-            with tab1:
-                st.subheader("📈 Key Metrics")
-                df = pd.DataFrame(metrics.items(), columns=["Metric", "Value"])
-                df["Value"] = pd.to_numeric(df["Value"], errors="coerce")
-                styled_df = df.style.format({"Value": "{:.2f}"}).highlight_null(null_color='red').set_properties(**{'background-color': '#f4f4f4', 'border': '1px solid #ddd'})
-                st.dataframe(styled_df, use_container_width=True)
+    # Show Metrics
+    st.subheader("📉 Key Metrics")
 
-                # Excel Export
-                excel_data = save_to_excel_with_chart(df, ticker)
-                st.download_button("📤 Download as Excel", excel_data, file_name=f"{ticker}_metrics.xlsx")
+    if not df.empty and "Value" in df.columns:
+        styled_df = df.style.format({"Value": "{:.2f}"}).highlight_null(null_color='red').set_properties(**{'text-align': 'center'})
+        st.dataframe(styled_df)
+    else:
+        st.warning("No data available or 'Value' column missing. Please try a different ticker or source.")
 
-                # Save history
-                history_df = pd.DataFrame([[datetime.now().isoformat(), ticker, data_source]],
-                                          columns=["Timestamp", "Ticker", "Source"])
-                try:
-                    history_df.to_csv("ticker_history.csv", mode='a', index=False, header=not pd.io.common.file_exists("ticker_history.csv"))
-                except:
-                    pass
+    # Optional Debug
+    # st.write("Raw DF:")
+    # st.write(df)
 
-                # Email alert
-                if email_address:
-                    success = send_email_alert(email_address, f"Metrics for {ticker}", df.to_string(index=False))
-                    if success:
-                        st.success(f"Email alert sent to {email_address}!")
-                    else:
-                        st.warning("Failed to send email. Check configuration.")
-
-            with tab2:
-                try:
-                    values = []
-                    labels = []
-                    for k, v in metrics.items():
-                        try:
-                            val = float(v)
-                            values.append(val)
-                            labels.append(k)
-                        except:
-                            continue
-
-                    if values:
-                        fig = px.bar(x=labels, y=values, labels={'x': 'Metric', 'y': 'Value'},
-                                     title=f"{ticker.upper()} - Key Financial Metrics",
-                                     color=labels, color_discrete_sequence=px.colors.sequential.Teal)
-                        st.plotly_chart(fig, use_container_width=True)
-                    else:
-                        st.warning("No numeric values found for visualization.")
-                except:
-                    st.warning("Visualization failed. Please check values.")
+# Tabs for Visualization (Placeholder)
+tabs = st.tabs(["📊 Metrics Table", "📈 Visualizations"])
+with tabs[0]:
+    st.write("Table view will go here")
+with tabs[1]:
+    st.write("Visual charts will go here")
