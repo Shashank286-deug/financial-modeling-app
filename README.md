@@ -1,30 +1,35 @@
-Financial Model & Valuation Dashboard
-A powerful and interactive Streamlit-based web application to fetch, visualize, and export financial data and valuation metrics for publicly traded companies. Built for analysts, finance students, and investors.
+# 📊 Financial Dashboard App
 
-🚀 Features
-📈 Key Metrics Extraction
-Fetch valuation metrics (P/E, EPS, EBITDA, Revenue, Cash Flow) from:
+A powerful Streamlit-based web application for visualizing and analyzing public company financials using the [Financial Modeling Prep (FMP)](https://financialmodelingprep.com/developer/docs/) API. This dashboard provides key financial metrics, DCF valuations, multi-year comparisons, price charts, and export capabilities.
 
-Yahoo Finance
+---
 
-Alpha Vantage
+## 🚀 Features
 
-Finnhub
+- 🔍 Search for any public company by ticker
+- 📈 Visualize multi-year financials (Income, Balance Sheet, Cash Flow)
+- 💹 Historical stock price line chart (1-year)
+- 💰 DCF valuation data from FMP
+- 📊 Key ratios: P/E, ROE, ROA, Debt/Equity, EPS
+- 📤 Export full financial data to Excel
+- 📉 Revenue trends over time
+- 🔄 Real-time updates via API
 
-📊 Interactive Visualizations
-Beautiful and responsive Plotly charts for financial metrics.
+---
 
-📁 Excel Export with Auto-Charting
-Export financial data to Excel with built-in bar charts using openpyxl.
+## 🧰 Tech Stack
 
-🧠 Ticker History Tracking
-Saves searched tickers with timestamp for analysis or resumption.
+- **Frontend:** [Streamlit](https://streamlit.io)
+- **Data Source:** [FMP API](https://financialmodelingprep.com/developer/docs/)
+- **Visualization:** Plotly, Seaborn, Matplotlib
+- **Excel Export:** OpenPyXL, Pandas
 
-📧 Email Alerts (Optional)
-Send financial metrics to an email address.
+---
 
-🌗 Dark Mode Toggle
-Switch between light and dark UI modes.
+## 🛠 Setup Instructions
 
-🗃️ Tabbed Layout for Organization
-View tables and charts in a clean, tabbed interface.
+### 1. Clone this Repo
+
+```bash
+git clone https://github.com/your-username/financial-dashboard-app.git
+cd financial-dashboard-app
