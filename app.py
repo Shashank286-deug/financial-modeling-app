@@ -12,24 +12,13 @@ from io import BytesIO
 from datetime import datetime
 import openpyxl
 from openpyxl.chart import BarChart, Reference
-import time
 
-# --- CONFIG ---
-FMP_API_KEY = "demo"  # Replace with your actual key
-ALPHA_VANTAGE_API_KEY = "Q8LU981EWC83K7VI"
-FINNHUB_API_KEY = "cvrbc29r01qp88cpdph0cvrbc29r01qp88cpdphg"
-
-# --- STREAMLIT SETUP ---
+# Set layout with dark mode toggle
 st.set_page_config(page_title="Financial Dashboard", layout="wide")
 st.title("📊 Financial Model & Valuation Dashboard")
 
-# --- SIDEBAR ---
-st.sidebar.header("Settings")
+# Theme toggle
 theme = st.sidebar.radio("Choose Theme", ["Light", "Dark"])
-data_source = st.sidebar.selectbox("Choose Data Source", ["Yahoo Finance", "Alpha Vantage", "Finnhub", "FMP"])
-ticker = st.sidebar.text_input("Enter Stock Ticker", value="AAPL")
-email_address = st.sidebar.text_input("Enter Email for Alerts (optional)")
-
 if theme == "Dark":
     st.markdown("""
         <style>
@@ -40,59 +29,78 @@ if theme == "Dark":
         </style>
     """, unsafe_allow_html=True)
 
-# --- DATA FETCH FUNCTIONS ---
+# Sidebar Settings
+st.sidebar.header("Settings")
+data_source = st.sidebar.selectbox("Choose Data Source", ["Yahoo Finance", "Alpha Vantage", "Finnhub", "FMP"])
+ticker = st.sidebar.text_input("Enter Stock Ticker", value="AAPL")
+email_address = st.sidebar.text_input("Enter Email for Alerts (optional)")
+
+# Hardcoded API keys
+ALPHA_VANTAGE_API_KEY = "Q8LU981EWC83K7VI"
+FINNHUB_API_KEY = "cvrbc29r01qp88cpdph0cvrbc29r01qp88cpdphg"
+FMP_API_KEY = "uPJt4YPx3t5TRmcCpS7emobdeRLAngRG"
+
+# Functions
 def get_yahoo_data(ticker):
     stock = yf.Ticker(ticker)
     info = stock.info
-    return {
+    data = {
         "P/E Ratio": info.get("trailingPE", "N/A"),
         "EPS": info.get("trailingEps", "N/A"),
         "EBITDA": info.get("ebitda", "N/A"),
         "Cash Flow": info.get("operatingCashflow", "N/A"),
         "Revenue": info.get("totalRevenue", "N/A")
     }
+    return data
 
 def get_alpha_data(ticker):
     url = f"https://www.alphavantage.co/query?function=OVERVIEW&symbol={ticker}&apikey={ALPHA_VANTAGE_API_KEY}"
     r = requests.get(url)
+    if r.status_code != 200:
+        return {}
     info = r.json()
-    return {
+    data = {
         "P/E Ratio": info.get("PERatio", "N/A"),
         "EPS": info.get("EPS", "N/A"),
         "EBITDA": info.get("EBITDA", "N/A"),
         "Cash Flow": info.get("OperatingCashflow", "N/A"),
         "Revenue": info.get("RevenueTTM", "N/A")
-    } if r.status_code == 200 else {}
+    }
+    return data
 
 def get_finnhub_data(ticker):
     client = finnhub.Client(api_key=FINNHUB_API_KEY)
     try:
         fundamentals = client.company_basic_financials(ticker, 'all')['metric']
-        return {
+        data = {
             "P/E Ratio": fundamentals.get("peBasicExclExtraTTM", "N/A"),
             "EPS": fundamentals.get("epsTTM", "N/A"),
             "EBITDA": fundamentals.get("ebitda", "N/A"),
             "Cash Flow": fundamentals.get("freeCashFlowTTM", "N/A"),
             "Revenue": fundamentals.get("revenueTTM", "N/A")
         }
+        return data
     except:
         return {}
 
-def get_fmp_data(ticker, api_key=FMP_API_KEY):
-    url = f"https://financialmodelingprep.com/api/v3/profile/{ticker}?apikey={api_key}"
-    response = requests.get(url)
-    if response.status_code != 200 or not response.json():
+def get_fmp_data(ticker):
+    url = f"https://financialmodelingprep.com/api/v3/key-metrics-ttm/{ticker}?apikey={FMP_API_KEY}"
+    r = requests.get(url)
+    if r.status_code != 200:
         return {}
-    profile = response.json()[0]
-    return {
-        "P/E Ratio": profile.get("pe"),
-        "EPS": profile.get("eps"),
-        "EBITDA": profile.get("ebitda"),
-        "Cash Flow": profile.get("freeCashFlow"),
-        "Revenue": profile.get("revenue")
-    }
+    try:
+        info = r.json()[0]
+        data = {
+            "P/E Ratio": info.get("peRatioTTM", "N/A"),
+            "EPS": info.get("epsTTM", "N/A"),
+            "EBITDA": info.get("ebitdaTTM", "N/A"),
+            "Cash Flow": info.get("freeCashFlowTTM", "N/A"),
+            "Revenue": info.get("revenueTTM", "N/A")
+        }
+        return data
+    except:
+        return {}
 
-# --- EMAIL ALERT ---
 def send_email_alert(receiver, subject, body):
     try:
         msg = EmailMessage()
@@ -100,6 +108,7 @@ def send_email_alert(receiver, subject, body):
         msg['From'] = "financial-dashboard@example.com"
         msg['To'] = receiver
         msg.set_content(body)
+
         with smtplib.SMTP("smtp.gmail.com", 587) as server:
             server.starttls()
             # server.login("you@example.com", "password")
@@ -109,28 +118,32 @@ def send_email_alert(receiver, subject, body):
     except:
         return False
 
-# --- EXCEL EXPORT ---
 def save_to_excel_with_chart(df, ticker):
     buffer = BytesIO()
     df.to_excel(buffer, index=False, sheet_name="Metrics")
     buffer.seek(0)
+
     wb = openpyxl.load_workbook(buffer)
     ws = wb["Metrics"]
+
     chart = BarChart()
     chart.title = f"{ticker} Metrics"
     chart.y_axis.title = 'Value'
     chart.x_axis.title = 'Metric'
+
     data_ref = Reference(ws, min_col=2, min_row=1, max_row=6)
     cats_ref = Reference(ws, min_col=1, min_row=2, max_row=6)
     chart.add_data(data_ref, titles_from_data=True)
     chart.set_categories(cats_ref)
+
     ws.add_chart(chart, "D2")
+
     final_buffer = BytesIO()
     wb.save(final_buffer)
     final_buffer.seek(0)
     return final_buffer
 
-# --- FETCH DATA ---
+# Fetch Button
 if st.button("📅 Fetch Data"):
     with st.spinner("Fetching data..."):
         if data_source == "Yahoo Finance":
@@ -158,7 +171,8 @@ if st.button("📅 Fetch Data"):
                 excel_data = save_to_excel_with_chart(df, ticker)
                 st.download_button("📤 Download as Excel", excel_data, file_name=f"{ticker}_metrics.xlsx")
 
-                history_df = pd.DataFrame([[datetime.now().isoformat(), ticker, data_source]], columns=["Timestamp", "Ticker", "Source"])
+                history_df = pd.DataFrame([[datetime.now().isoformat(), ticker, data_source]],
+                                          columns=["Timestamp", "Ticker", "Source"])
                 try:
                     history_df.to_csv("ticker_history.csv", mode='a', index=False, header=not pd.io.common.file_exists("ticker_history.csv"))
                 except:
@@ -173,13 +187,16 @@ if st.button("📅 Fetch Data"):
 
             with tab2:
                 try:
-                    values, labels = [], []
+                    values = []
+                    labels = []
                     for k, v in metrics.items():
                         try:
-                            values.append(float(v))
+                            val = float(v)
+                            values.append(val)
                             labels.append(k)
                         except:
                             continue
+
                     if values:
                         fig = px.bar(x=labels, y=values, labels={'x': 'Metric', 'y': 'Value'},
                                      title=f"{ticker.upper()} - Key Financial Metrics",
