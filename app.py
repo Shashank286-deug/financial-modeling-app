@@ -61,66 +61,67 @@ if st.button("📥 Fetch Financials"):
     with st.spinner("Loading data from FMP..."):
         data = get_fmp_financials(ticker)
 
-        st.markdown("---")
-        st.header(f"🧾 {ticker.upper()} ({data['profile'][0].get('companyName', 'N/A')})")
+        # Basic Company Info Panel
+        if data['profile']:
+            profile = data['profile'][0]
+            with st.expander("🏢 Company Overview"):
+                st.markdown(f"**{profile.get('companyName', 'N/A')}** ({profile.get('symbol', '')})")
+                st.markdown(f"**Industry**: {profile.get('industry', 'N/A')}")
+                st.markdown(f"**IPO Date**: {profile.get('ipoDate', 'N/A')}")
+                st.markdown(f"**Sector**: {profile.get('sector', 'N/A')}")
 
-        # Summary Info
-        with st.expander("📌 Company Summary"):
-            industry = data['profile'][0].get('industry', 'N/A')
-            ipo_year = data['profile'][0].get('ipoDate', 'N/A')
-            st.markdown(f"**Industry**: {industry}")
-            st.markdown(f"**IPO Year**: {ipo_year[:4] if ipo_year != 'N/A' else 'N/A'}")
+            # Quick Stats Side Card
+            with st.sidebar:
+                st.markdown("### 🔍 Quick Stats")
+                st.metric("Market Cap", f"{profile.get('mktCap', 'N/A'):,}")
+                st.metric("Beta", f"{profile.get('beta', 'N/A')}")
+                st.metric("52W Range", f"{profile.get('range', 'N/A')}")
+                st.metric("Exchange", f"{profile.get('exchange', 'N/A')}")
 
         # Display Key Ratios
-        view_mode = st.radio("Choose View Mode:", ["📊 Summary View", "🔍 Deep Dive View"], horizontal=True)
         st.subheader("📌 Key Ratios")
         ratios = data['ratios']
         if isinstance(ratios, list) and len(ratios) > 0:
             ratio_data = ratios[0]
-            pe = ratio_data.get("peRatioTTM", float('nan'))
-            roe = ratio_data.get("returnOnEquityTTM", float('nan'))
-            roa = ratio_data.get("returnOnAssetsTTM", float('nan'))
-            de = ratio_data.get("debtEquityRatioTTM", float('nan'))
-            eps = ratio_data.get("epsTTM", float('nan'))
-
-            kpi_cols = st.columns(5)
-            kpi_cols[0].metric("P/E Ratio", f"{pe:.2f}", delta=None, delta_color="inverse")
-            kpi_cols[1].metric("ROE", f"{roe:.2f}")
-            kpi_cols[2].metric("ROA", f"{roa:.2f}")
-            kpi_cols[3].metric("Debt/Equity", f"{de:.2f}")
-            kpi_cols[4].metric("EPS", f"{eps:.2f}")
-
+            formatted_ratios = {
+                "P/E Ratio": ratio_data.get("peRatioTTM", float('nan')),
+                "ROE": ratio_data.get("returnOnEquityTTM", float('nan')),
+                "ROA": ratio_data.get("returnOnAssetsTTM", float('nan')),
+                "Debt/Equity": ratio_data.get("debtEquityRatioTTM", float('nan')),
+                "EPS": ratio_data.get("epsTTM", float('nan'))
+            }
+            ratios_df = pd.DataFrame([formatted_ratios])
+            st.dataframe(ratios_df.style.format({col: "{:.2f}" for col in ratios_df.columns}), use_container_width=True)
         else:
             st.warning("Ratio data not available or in unexpected format.")
 
-        if view_mode == "🔍 Deep Dive View":
-            # DCF Valuation
-            st.subheader("📈 DCF Valuation")
-            if data['dcf']:
-                try:
-                    dcf_value = float(data['dcf'][0]['dcf'])
-                    price = float(data['dcf'][0]['Stock Price'])
-                    st.metric("DCF Value", f"${dcf_value:.2f}", delta=f"Market Price: ${price:.2f}")
-                except:
-                    st.warning("DCF data parsing error")
+        # DCF Valuation
+        st.subheader("📈 DCF Valuation")
+        if data['dcf']:
+            try:
+                dcf_value = float(data['dcf'][0]['dcf'])
+                price = float(data['dcf'][0]['Stock Price'])
+                st.metric("DCF Value", f"${dcf_value:.2f}", delta=f"Market Price: ${price:.2f}")
+            except:
+                st.warning("DCF data parsing error")
 
-            # Multi-year Comparisons
-            st.subheader("🗂 Multi-Year Financials")
-            for name, d in [
-                ("Income Statement", data['income']),
-                ("Balance Sheet", data['balance']),
-                ("Cash Flow", data['cashflow'])
-            ]:
-                with st.expander(name):
-                    if isinstance(d, list) and d:
-                        df = pd.DataFrame(d)
-                        if 'date' in df.columns:
-                            df.set_index("date", inplace=True)
-                        st.dataframe(df.style.format(na_rep="-"), use_container_width=True)
-                    else:
-                        st.warning(f"{name} not available from FMP.")
+        # Multi-year Comparisons
+        st.subheader("🗂 Multi-Year Financials")
+        for name, d in [
+            ("Income Statement", data['income']),
+            ("Balance Sheet", data['balance']),
+            ("Cash Flow", data['cashflow'])
+        ]:
+            if isinstance(d, list) and d:
+                df = pd.DataFrame(d)
+                if 'date' in df.columns:
+                    df.set_index("date", inplace=True)
+                st.markdown(f"### {name}")
+                st.dataframe(df.style.format(na_rep="-"), use_container_width=True)
+            else:
+                st.warning(f"{name} not available from FMP.")
 
-        # Revenue Chart
+        # Bar Chart - Total Revenue
         st.subheader("📊 Revenue Trend")
         if data['income']:
             df_rev = pd.DataFrame(data['income'])
@@ -132,7 +133,7 @@ if st.button("📥 Fetch Financials"):
             else:
                 st.warning("Revenue data not available.")
 
-        # Historical Price
+        # Historical Stock Price Line Chart
         st.subheader("📉 Historical Stock Price")
         if data['price'] and 'historical' in data['price']:
             df_price = pd.DataFrame(data['price']['historical'])
@@ -148,7 +149,7 @@ if st.button("📥 Fetch Financials"):
             else:
                 st.error("Could not fetch stock data from Yahoo Finance either.")
 
-        # Excel Export
+        # Excel Export of Full Financials
         st.subheader("📤 Export to Excel")
         with BytesIO() as buffer:
             with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
