@@ -1,9 +1,8 @@
 streamlit
-yfinance
-requests
 pandas
+requests
+plotly
 seaborn
 matplotlib
-finnhub-python
-plotly
 openpyxl
+tradingview_ta
