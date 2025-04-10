@@ -1,5 +1,5 @@
 import streamlit as st
-import yfinance as yf
+
 import requests
 import pandas as pd
 import seaborn as sns
