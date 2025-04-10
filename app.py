@@ -52,16 +52,19 @@ if st.button("📥 Fetch Financials"):
 
         # Display Key Ratios
         st.subheader("📌 Key Ratios")
-        if data['ratios']:
-            ratios = data['ratios']
+        ratios = data['ratios']
+        if isinstance(ratios, list) and len(ratios) > 0:
+            ratio_data = ratios[0]  # First element of the list is the actual dictionary
             ratios_df = pd.DataFrame([{
-                "P/E Ratio": ratios.get("peRatioTTM"),
-                "ROE": ratios.get("returnOnEquityTTM"),
-                "ROA": ratios.get("returnOnAssetsTTM"),
-                "Debt/Equity": ratios.get("debtEquityRatioTTM"),
-                "EPS": ratios.get("epsTTM")
+                "P/E Ratio": ratio_data.get("peRatioTTM"),
+                "ROE": ratio_data.get("returnOnEquityTTM"),
+                "ROA": ratio_data.get("returnOnAssetsTTM"),
+                "Debt/Equity": ratio_data.get("debtEquityRatioTTM"),
+                "EPS": ratio_data.get("epsTTM")
             }])
             st.dataframe(ratios_df.style.format("{:.2f}"), use_container_width=True)
+        else:
+            st.warning("Ratio data not available or in unexpected format.")
 
         # DCF Valuation
         st.subheader("📈 DCF Valuation")
