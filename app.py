@@ -63,7 +63,7 @@ if st.button("📥 Fetch Financials"):
                 "EPS": ratio_data.get("epsTTM", float('nan'))
             }
             ratios_df = pd.DataFrame([formatted_ratios])
-            st.dataframe(ratios_df.style.format("{:.2f}"), use_container_width=True)
+            st.dataframe(ratios_df.style.format({col: "{:.2f}" for col in ratios_df.columns}), use_container_width=True)
         else:
             st.warning("Ratio data not available or in unexpected format.")
 
@@ -114,6 +114,5 @@ if st.button("📥 Fetch Financials"):
                 pd.DataFrame(data['income']).to_excel(writer, sheet_name="Income", index=False)
                 pd.DataFrame(data['balance']).to_excel(writer, sheet_name="Balance", index=False)
                 pd.DataFrame(data['cashflow']).to_excel(writer, sheet_name="Cash Flow", index=False)
-                pd.DataFrame(data['ratios'], index=[0]).to_excel(writer, sheet_name="Ratios", index=False)
-                writer.save()
+                pd.DataFrame([ratios[0]] if isinstance(ratios, list) and ratios else [{}]).to_excel(writer, sheet_name="Ratios", index=False)
             st.download_button("💾 Download Full Financials", buffer.getvalue(), file_name=f"{ticker}_financials.xlsx")
