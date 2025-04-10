@@ -12,8 +12,10 @@ from openpyxl.chart import BarChart, Reference
 import yfinance as yf
 from tradingview_ta import TA_Handler, Interval, Exchange
 
-# Load FMP API key securely from Streamlit secrets
+# Load API keys securely from Streamlit secrets
 FMP_API_KEY = st.secrets["FMP_API_KEY"]
+FINNHUB_API_KEY = st.secrets.get("FINNHUB_API_KEY", "cvruj4hr01qnpem9ptd0cvruj4hr01qnpem9ptdg")
+ALPHAV_API_KEY = st.secrets.get("ALPHAV_API_KEY", "RJFBECXE6JM1JGFN")
 
 st.set_page_config(page_title="Financial Dashboard", layout="wide")
 st.title("📊 Financial Model & Valuation Dashboard")
@@ -33,8 +35,7 @@ def get_fmp_financials(ticker):
         "cashflow": f"/cash-flow-statement/{ticker}?limit=5{suffix}",
         "ratios": f"/ratios-ttm/{ticker}{suffix}",
         "dcf": f"/discounted-cash-flow/{ticker}{suffix}",
-        "price": f"/historical-price-full/{ticker}?serietype=line&timeseries=365{suffix}",
-        "profile": f"/profile/{ticker}{suffix}"
+        "price": f"/historical-price-full/{ticker}?serietype=line&timeseries=365{suffix}"
     }
 
     data = {}
@@ -56,22 +57,28 @@ def get_yahoo_data(ticker):
     except:
         return pd.DataFrame()
 
-# CAGR Calculation
-def calculate_cagr(start_value, end_value, periods):
-    if start_value <= 0 or end_value <= 0 or periods <= 0:
-        return float('nan')
-    return (end_value / start_value) ** (1 / periods) - 1
+# Additional data source from Alpha Vantage
+@st.cache_data(ttl=3600)
+def get_alpha_vantage_data(ticker):
+    url = f"https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol={ticker}&apikey={ALPHAV_API_KEY}"
+    r = requests.get(url)
+    if r.status_code == 200:
+        return r.json()
+    return {}
+
+# Additional data source from Finnhub
+@st.cache_data(ttl=3600)
+def get_finnhub_profile(ticker):
+    url = f"https://finnhub.io/api/v1/stock/profile2?symbol={ticker}&token={FINNHUB_API_KEY}"
+    r = requests.get(url)
+    if r.status_code == 200:
+        return r.json()
+    return {}
 
 # Fetch Button
 if st.button("📥 Fetch Financials"):
     with st.spinner("Loading data from FMP..."):
         data = get_fmp_financials(ticker)
-
-        # Display Company Name and Industry Info
-        if data['profile']:
-            info = data['profile'][0]
-            st.subheader(f"{ticker} ({info.get('companyName')})")
-            st.caption(f"Industry: {info.get('industry')} | Sector: {info.get('sector')} | IPO Year: {info.get('ipoDate', '')[:4]}")
 
         # Display Key Ratios
         st.subheader("📌 Key Ratios")
@@ -116,34 +123,17 @@ if st.button("📥 Fetch Financials"):
             else:
                 st.warning(f"{name} not available from FMP.")
 
-        # EPS Growth Trend
-        st.subheader("📈 EPS Growth Over Time")
+        # Bar Chart - Total Revenue
+        st.subheader("📊 Revenue Trend")
         if data['income']:
-            df_eps = pd.DataFrame(data['income'])
-            if 'eps' in df_eps.columns:
-                df_eps = df_eps[['date', 'eps']].dropna()
-                df_eps['eps'] = pd.to_numeric(df_eps['eps'])
-                fig_eps = px.line(df_eps.sort_values('date'), x='date', y='eps', title="EPS Over Time")
-                st.plotly_chart(fig_eps, use_container_width=True)
-
-        # Sector Comparison with Peers
-        st.subheader("🏢 Industry Benchmarking")
-        peer_tickers = st.multiselect("Select Peers for Comparison", ["AAPL", "MSFT", "GOOGL", "AMZN", "META"], default=["AAPL", "MSFT"])
-        metric = st.selectbox("Choose Metric", ["EPS", "Return on Equity", "Return on Assets"])
-        sector_data = []
-        for peer in peer_tickers:
-            peer_data = get_fmp_financials(peer)
-            try:
-                ratio = peer_data['ratios'][0]
-                val = ratio.get("epsTTM" if metric == "EPS" else ("returnOnEquityTTM" if metric == "Return on Equity" else "returnOnAssetsTTM"), float('nan'))
-                sector_data.append({"Ticker": peer, metric: val})
-            except:
-                continue
-
-        if sector_data:
-            df_sector = pd.DataFrame(sector_data)
-            fig_sector = px.bar(df_sector, x='Ticker', y=metric, color='Ticker', title=f"Sector Comparison by {metric}")
-            st.plotly_chart(fig_sector, use_container_width=True)
+            df_rev = pd.DataFrame(data['income'])
+            if 'revenue' in df_rev.columns:
+                df_rev = df_rev[['date', 'revenue']].dropna()
+                df_rev['revenue'] = pd.to_numeric(df_rev['revenue'])
+                fig = px.bar(df_rev.sort_values(by='date'), x='date', y='revenue', title="Revenue Over Time")
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.warning("Revenue data not available.")
 
         # Historical Stock Price Line Chart
         st.subheader("📉 Historical Stock Price")
@@ -161,7 +151,7 @@ if st.button("📥 Fetch Financials"):
             else:
                 st.error("Could not fetch stock data from Yahoo Finance either.")
 
-        # Export to Excel
+        # Excel Export of Full Financials
         st.subheader("📤 Export to Excel")
         with BytesIO() as buffer:
             with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
