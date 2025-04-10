@@ -1,16 +1,16 @@
 import streamlit as st
-
+import yfinance as yf
 import requests
 import pandas as pd
-
+import seaborn as sns
 import matplotlib.pyplot as plt
-
-
+import finnhub
+import plotly.express as px
 import smtplib
 from email.message import EmailMessage
 from io import BytesIO
 from datetime import datetime
-
+import openpyxl
 from openpyxl.chart import BarChart, Reference
 import time
 
